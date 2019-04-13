@@ -1,9 +1,10 @@
 {
   "name": "sqlex",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Typescript definition for sqlex",
   "author": "Weidong Fang",
   "files": [
+    "index.js",
     "index.d.ts",
     "LICENSE",
     "package.json",
