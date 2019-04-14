@@ -1,0 +1,9 @@
+*~
+*.swp
+*.swo
+*.log
+.vscode
+node_modules/
+coverage/
+dist/
+package-lock.json

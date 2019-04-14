@@ -1,13 +1,51 @@
 {
   "name": "sqlex",
-  "version": "0.1.2",
-  "description": "Typescript definition for sqlex",
+  "version": "0.2.0",
+  "description": "Generic database schema definitions",
   "author": "Weidong Fang",
   "files": [
-    "index.js",
-    "index.d.ts",
+    "dist",
+    "lib",
+    "bin",
     "LICENSE",
     "package.json",
     "README.md"
-  ]
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/fangwd/sqlex.git"
+  },
+  "devDependencies": {
+    "@types/jest": "^24.0.11",
+    "@types/node": "^11.13.4",
+    "jest": "^24.7.1",
+    "ts-jest": "^24.0.2",
+    "typescript": "^3.4.3"
+  },
+  "scripts": {
+    "test": "jest",
+    "build": "tsc"
+  },
+  "jest": {
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest"
+    },
+    "testEnvironment": "node",
+    "testRegex": "/tests/.+\\.test.ts",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx",
+      "json",
+      "node"
+    ],
+    "collectCoverage": true,
+    "collectCoverageFrom": [
+      "src/**/*.ts"
+    ],
+    "verbose": true
+  }
 }
