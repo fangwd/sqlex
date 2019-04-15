@@ -15,7 +15,7 @@ export interface ClosureTable {
 export interface Model {
   name?: string;
   table?: string;
-  fields: Field[];
+  fields?: Field[];
   pluralName?: string;
   closureTable?: ClosureTable;
 }
@@ -25,9 +25,7 @@ export interface Field {
   column?: string;
   relatedName?: string;
   throughField?: string;
-  // GraphQL
-  type?: string;
-  relatedType?: string;
+  userType?: string;
 }
 
 export const DEFAULT_SCHEMA: Schema = { models: [] };

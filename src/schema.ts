@@ -71,11 +71,15 @@ export class Schema {
   }
 }
 
+interface Table extends types.Table {
+  shortName: string;
+}
+
 export class Model {
   schema: Schema;
   name: string;
   fields: Field[] = [];
-  table: types.Table;
+  table: Table;
   config: ModelConfig;
   primaryKey!: UniqueKey;
   uniqueKeys: UniqueKey[] = [];
@@ -85,12 +89,11 @@ export class Model {
 
   constructor(schema: Schema, table: types.Table, config?: ModelConfig) {
     this.schema = schema;
-    this.table = table;
+    this.table = { ...table, shortName: schema.deprefix(table.name) };
     this.config = { ...DEFAULT_MODEL_CONFIG, ...config };
-    this.name = this.config.name || toPascalCase(schema.deprefix(table.name));
+    this.name = this.config.name || toPascalCase(this.table.shortName);
     this.pluralName =
-      this.config.pluralName ||
-      toCamelCase(pluralise(schema.deprefix(table.name)));
+      this.config.pluralName || toCamelCase(pluralise(this.table.shortName));
     this.fieldMap = new Map();
 
     const references: { [key: string]: types.Constraint } = {};
@@ -115,7 +118,8 @@ export class Model {
 
   private getFieldConfig(column: types.Column) {
     return (
-      this.config.fields.find(field => field.column === column.name) ||
+      (this.config.fields &&
+        this.config.fields.find(field => field.column === column.name)) ||
       DEFAULT_FIELD_CONFIG
     );
   }
@@ -128,6 +132,70 @@ export class Model {
     return this.primaryKey && this.primaryKey.fields.length === 1
       ? this.primaryKey.fields[0]
       : undefined;
+  }
+
+  keyValue(row: types.Document): types.Value | undefined {
+    const keyField = this.keyField();
+    return keyField ? this.valueOf(row, keyField.name) : undefined;
+  }
+
+  valueOf(
+    row: types.Document,
+    name: string | SimpleField
+  ): types.Value | undefined {
+    if (!row) return undefined;
+    const field = typeof name === 'string' ? this.field(name) : name;
+    if (field === undefined) throw Error(`Bad field: ${name}`);
+    let value = row[field.name];
+    if (field instanceof ForeignKeyField) {
+      let key = field;
+      while (value !== undefined && !isValue(value)) {
+        key = key.referencedField as ForeignKeyField;
+        value = (value as types.Document)[key.name];
+      }
+    }
+    return value as types.Value;
+  }
+
+  checkUniqueKey(
+    row: types.Document,
+    reject?: (value: any) => boolean
+  ): UniqueKey | null {
+    if (!row) return null;
+
+    reject = reject || (value => value === undefined);
+
+    let uniqueKey: UniqueKey | null = this.primaryKey;
+    for (const field of uniqueKey.fields) {
+      let value = row[field.name];
+      if (value === undefined) {
+        value = row[field.name + '__in'];
+      }
+      if (reject(value)) {
+        uniqueKey = null;
+        break;
+      }
+    }
+
+    if (!uniqueKey) {
+      for (const key of this.uniqueKeys) {
+        if (!key.primary) {
+          let missing;
+          for (const field of key.fields) {
+            if (reject(row[field.name])) {
+              missing = field;
+              break;
+            }
+          }
+          if (!missing) {
+            uniqueKey = key;
+            break;
+          }
+        }
+      }
+    }
+
+    return uniqueKey;
   }
 
   getForeignKeyCount(model: Model): number {
@@ -394,5 +462,90 @@ export class UniqueKey {
 
   autoIncrement() {
     return this.fields.length === 1 && this.fields[0].column.autoIncrement;
+  }
+}
+
+export function isValue(value: any): boolean {
+  if (value === null) return true;
+
+  const type = typeof value;
+  if (type === 'string' || type === 'number' || type === 'boolean') {
+    return true;
+  }
+
+  return value instanceof Date;
+}
+
+export function getReferencingFields(model: Model): ForeignKeyField[] {
+  const fields = [];
+  for (const entry of model.schema.models) {
+    for (const field of entry.fields) {
+      if (field instanceof ForeignKeyField) {
+        if (field.referencedField.model === model) {
+          fields.push(field);
+        }
+      }
+    }
+  }
+  return fields;
+}
+
+export function setModelName(config: SchemaConfig, model: Model, name: string) {
+  const re = new RegExp(
+    `(\\b|[^A-Za-z0-9])${model.table.shortName}(\\b|[^A-Za-z0-9])`
+  );
+  for (const field of getReferencingFields(model)) {
+    if (re.test(field.column.name)) {
+      const modelConfig = getModelConfig(config, field.model);
+      if (re.test(field.column.name)) {
+        const s = field.column.name.replace(re, `$1${name}$2`);
+        // cf. ForeignKeyField::constructor
+        setFieldName(
+          modelConfig,
+          field,
+          lcfirst(toCamelCase(s.replace(/_id$/, '')))
+        );
+      }
+    }
+  }
+  const modelConfig = getModelConfig(config, model);
+  modelConfig.name = name;
+  modelConfig.pluralName = lcfirst(pluralise(name));
+}
+
+function getModelConfig(config: SchemaConfig, model: Model) {
+  config.models = config.models || [];
+  let entry = config.models.find(
+    config => config.table === model.table.shortName
+  );
+  if (!entry) {
+    entry = {
+      table: model.table.shortName
+    };
+    config.models.push(entry);
+  }
+  return entry;
+}
+
+function setFieldName(config: ModelConfig, field: SimpleField, name: string) {
+  if (!config.fields) {
+    config.fields = [
+      {
+        column: field.column.name,
+        name
+      }
+    ];
+  } else {
+    const entry = config.fields.find(
+      entry => entry.column === field.column.name
+    );
+    if (!entry) {
+      config.fields.push({
+        column: field.column.name,
+        name
+      });
+    } else {
+      entry.name = name;
+    }
   }
 }

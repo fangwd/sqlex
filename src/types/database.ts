@@ -11,6 +11,10 @@ export interface Table {
 
 export type Value = string | number | boolean | Date | null;
 
+export type Document = {
+  [key: string]: Value | Value[] | Document | Document[];
+};
+
 export interface Column {
   name: string;
   type: string;
