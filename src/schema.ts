@@ -195,6 +195,19 @@ export class Model {
       }
     }
 
+    if (!uniqueKey) {
+      for (const name in row) {
+        const field = this.field(name);
+        if (field instanceof RelatedField) {
+          const model = field.referencingField.model;
+          if (model.checkUniqueKey(row[name] as types.Document)) {
+            // Table._modify()
+            return this.primaryKey;
+          }
+        }
+      }
+    }
+
     return uniqueKey;
   }
 
