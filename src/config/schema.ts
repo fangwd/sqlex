@@ -1,5 +1,5 @@
 export interface Schema {
-  tablePrefix?: RegExp;
+  tablePrefix?: string;
   models: Model[];
 }
 

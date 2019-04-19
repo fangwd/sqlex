@@ -14,6 +14,7 @@ export class Schema {
   database: types.Database;
   config: SchemaConfig;
   models: Model[] = [];
+  tablePrefix?: RegExp;
 
   private modelMap: Map<string, Model>;
 
@@ -21,6 +22,10 @@ export class Schema {
     this.database = database;
     this.config = { ...DEFAULT_SCHEMA_CONFIG, ...config };
     this.modelMap = new Map();
+
+    if (this.config.tablePrefix) {
+      this.tablePrefix = new RegExp(this.config.tablePrefix);
+    }
 
     for (const table of database.tables) {
       const model = new Model(
@@ -41,9 +46,7 @@ export class Schema {
   }
 
   deprefix(name: string): string {
-    return this.config.tablePrefix
-      ? name.replace(this.config.tablePrefix, '')
-      : name;
+    return this.tablePrefix ? name.replace(this.tablePrefix, '') : name;
   }
 
   private getModelConfig(name: string) {
