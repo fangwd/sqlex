@@ -1,6 +1,6 @@
 {
   "name": "sqlex",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Generic database schema definitions",
   "author": "Weidong Fang",
   "files": [

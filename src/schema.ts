@@ -400,7 +400,7 @@ export class RelatedField extends Field {
               if (this.referencingField === field) continue;
               if (field instanceof ForeignKeyField) {
                 other = field;
-              } else if (!(field.uniqueKey as UniqueKey).primary) {
+              } else if (!field.uniqueKey || !(field.uniqueKey as UniqueKey).primary) {
                 extra = field;
                 break;
               }
