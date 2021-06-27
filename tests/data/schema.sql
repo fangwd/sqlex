@@ -67,7 +67,7 @@ create table category_tree (
 create table product (
   id integer primary key auto_increment,
   sku char(40) unique,
-  name char(200),
+  name varchar(200),
   price float,
   stock_quantity float,
   status int
@@ -138,20 +138,20 @@ create table `store_product` (
   store_id integer,
   product_id integer,
   price float,
-  constraint unique (store_id, product_id),
+  unique (store_id, product_id),
   foreign key (store_id) references store(id),
   foreign key (product_id) references product(id)
 );
 
 create table post(
-  id int key auto_increment,
+  id integer primary key auto_increment,
   title varchar(100),
   user_id int,
   foreign key (user_id) references user(id)
 );
 
 create table comment(
-  id int key auto_increment,
+  id integer primary key auto_increment,
   post_id int,
   parent_id integer default null,
   content varchar(100),

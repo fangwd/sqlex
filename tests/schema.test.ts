@@ -6,8 +6,11 @@ import {
   RelatedField,
   ForeignKeyField,
   UniqueKey,
-  SimpleField
+  SimpleField,
+  setModelName
 } from '../src/schema';
+import { Schema as SchemaConfig } from '../src/config'
+import helper = require('./helper');
 
 let schemaInfo: Database;
 
@@ -215,4 +218,26 @@ describe('Other', () => {
     const product = model.field('product') as ForeignKeyField;
     expect((product.relatedField as RelatedField).throughField).toBeUndefined();
   });
+});
+
+
+test('setModelName', () => {
+  const schema = new Schema(helper.getExampleData());
+  const model = schema.model('post');
+  const config: SchemaConfig = { models: [{ table: 'post', name: 'Post' }] };
+  setModelName(config, model, 'WebPost');
+  {
+    const model = config.models.find(entry => entry.table === 'post');
+    expect(model.name).toBe('WebPost');
+  }
+  {
+    const model = config.models.find(entry => entry.table === 'user');
+    const field = model.fields.find(entry => entry.column === 'first_post_id');
+    expect(field.name).toBe('firstWebPost');
+  }
+  {
+    const model = config.models.find(entry => entry.table === 'comment');
+    const field = model.fields.find(entry => entry.column === 'post_id');
+    expect(field.name).toBe('webPost');
+  }
 });

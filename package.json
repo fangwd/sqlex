@@ -1,8 +1,8 @@
 {
   "name": "sqlex",
-  "version": "0.4.2",
-  "description": "Generic database schema definitions",
-  "author": "Weidong Fang",
+  "version": "1.0.0",
+  "description": "Sqlex - A library that makes database access easy and fun",
+  "main": "./dist/index.js",
   "files": [
     "dist",
     "lib",
@@ -11,21 +11,27 @@
     "package.json",
     "README.md"
   ],
-  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "author": "Weidong Fang",
+  "license": "MIT",
+  "dependencies": {},
   "repository": {
     "type": "git",
     "url": "http://github.com/fangwd/sqlex.git"
   },
   "devDependencies": {
-    "@types/jest": "^24.0.11",
-    "@types/node": "^11.13.4",
-    "jest": "^24.7.1",
-    "ts-jest": "^24.0.2",
-    "typescript": "^3.4.3"
+    "@types/jest": "^22.2.0",
+    "@types/mysql": "^2.15.4",
+    "@types/node": "^9.4.7",
+    "jest": "^22.4.1",
+    "mysql": "^2.18.1",
+    "pg": "^8.6.0",
+    "sqlite3": "^5.0.2",
+    "ts-jest": "^22.4.1",
+    "typescript": "*"
   },
   "scripts": {
-    "test": "jest",
+    "test": "jest --runInBand",
     "build": "tsc"
   },
   "jest": {
@@ -42,7 +48,7 @@
       "json",
       "node"
     ],
-    "collectCoverage": true,
+    "collectCoverage": false,
     "collectCoverageFrom": [
       "src/**/*.ts"
     ],
