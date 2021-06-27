@@ -15,6 +15,12 @@ export type Document = {
   [key: string]: Value | Value[] | Document | Document[];
 };
 
+export interface UserDefinedType {
+  type: 'enum';
+  name: string;
+  values: string[];
+};
+
 export interface Column {
   name: string;
   type: string;
@@ -22,6 +28,7 @@ export interface Column {
   nullable?: boolean;
   autoIncrement?: boolean;
   default?: Value;
+  userDefinedType?: UserDefinedType;
 }
 
 export interface Constraint {

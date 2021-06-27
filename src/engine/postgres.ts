@@ -193,10 +193,13 @@ class SchemaBuilder {
       map[row.table_name] = map[row.table_name] || [];
       const columnInfo: ColumnInfo = {
         name: row.column_name,
-        type: row.data_type.split(/\s/)[0],
+        type: row.data_type.split(/\s+/)[0],
         nullable: row.is_nullable === 'YES',
       };
       if (/char|text/i.exec(columnInfo.type)) {
+        if (/varying/i.test(row.data_type)) {
+          columnInfo.type = 'varchar';
+        }
         columnInfo.size = row.character_maximum_length;
       }
       else if (/USER-DEFINED/i.test(columnInfo.type)) {
@@ -204,7 +207,7 @@ class SchemaBuilder {
         if (enumMap[row.udt_name]) {
           const values = enumMap[row.udt_name];
           columnInfo.size = Math.max(...(values.map(value => value.length)));
-          (columnInfo as any).udt = {
+          columnInfo.userDefinedType = {
             type: 'enum',
             name: row.udt_name,
             values,

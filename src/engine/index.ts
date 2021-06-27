@@ -1,5 +1,5 @@
 import { getInformationSchema } from './information_schema';
-import { Value } from 'sqlex';
+import { Value } from '../types';
 
 export type Dialect = 'mysql' | 'postgres' | 'mssql' | 'oracle' | 'sqlite3';
 
