@@ -1,5 +1,5 @@
 import {
-  Expression,
+  Statement,
   Node,
   InfixNode,
   PrefixNode,
@@ -35,81 +35,85 @@ function yyPactValueIsDefault(yyvalue: int): boolean {
 function yyTableValueIsError(yyvalue: int): boolean {
   return yyvalue == yytable_ninf_;
 }
-const yypact_ninf_: byte = -3;
+const yypact_ninf_: byte = -5;
 const yytable_ninf_: byte = -1;
 const yypact_: byte[] = yypact_init();
 function yypact_init(): byte[] {
   return [
-    30, 30, 30, 30, -3, -3, -3, 2, 15, -2, -3, -3, 46, -3, -3, 24, -3, -3, 30,
-    30, 30, 30, 30, 30, 30, 30, 30, 30, -3, -3, 12, -2, 60, -3, 26, 26, -3, 57,
-    57, 57, 57, 57, 57, -3, -3, 30, -2,
+    35, 35, 35, 35, -5, -5, -5, 2, 16, -5, 52, -5, -5, 71, -5, -5, 27, -5, -5,
+    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, -5, -4, -5, -5, 30, 84, 111,
+    -5, 108, 108, -5, 31, 31, 31, 31, 31, 31, 97, -2, -5, -5, -5, 35, 84,
   ];
 }
 const yydefact_: byte[] = yydefact_init();
 function yydefact_init(): byte[] {
   return [
-    0, 0, 0, 0, 19, 20, 21, 18, 0, 2, 4, 17, 0, 15, 16, 0, 23, 1, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 3, 24, 0, 26, 0, 7, 5, 6, 8, 10, 14, 13, 11, 9, 12, 22, 25,
-    0, 27,
+    0, 0, 0, 0, 24, 25, 26, 23, 0, 2, 3, 7, 22, 0, 18, 19, 0, 28, 1, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 6, 29, 0, 31, 0, 10, 8, 9, 11, 13, 17, 16, 14,
+    12, 15, 20, 21, 4, 27, 30, 0, 32,
   ];
 }
 const yypgoto_: byte[] = yypgoto_init();
 function yypgoto_init(): byte[] {
-  return [-3, -3, -1, -3, -3, -3, -3];
+  return [-5, -5, -5, -1, -5, -5, -5, -5];
 }
 const yydefgoto_: byte[] = yydefgoto_init();
 function yydefgoto_init(): byte[] {
-  return [0, 8, 9, 10, 11, 16, 32];
+  return [0, 8, 9, 10, 11, 12, 17, 37];
 }
 const yytable_: byte[] = yytable_init();
 function yytable_init(): byte[] {
   return [
-    12, 13, 14, 18, 19, 15, 20, 21, 22, 23, 24, 25, 26, 27, 31, 17, 43, 33, 34,
-    35, 36, 37, 38, 39, 40, 41, 42, 1, 29, 30, 2, 18, 3, 1, 0, 21, 2, 0, 3, 0,
-    4, 5, 6, 7, 46, 0, 4, 5, 6, 7, 28, 18, 19, 0, 20, 21, 22, 23, 24, 25, 26,
-    27, 18, 19, 44, 20, 21, 45,
+    13, 14, 15, 19, 20, 16, 21, 22, 23, 24, 25, 26, 27, 28, 29, 36, 18, 50, 38,
+    39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 1, 34, 35, 2, 51, 3, 19, 20, 1,
+    21, 22, 2, 0, 3, 0, 4, 5, 6, 7, 0, 0, 0, 54, 4, 5, 6, 7, 19, 20, 0, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 30, 0, 0, 0, 31, 32, 33, 19, 20, 0, 21, 22, 23,
+    24, 25, 26, 27, 28, 29, 30, 19, 20, 0, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+    30, 19, 20, 0, 21, 22, 23, 24, 25, 26, 27, 28, 19, 0, 52, 0, 22, 53,
   ];
 }
 const yycheck_: byte[] = yycheck_init();
 function yycheck_init(): byte[] {
   return [
-    1, 2, 3, 5, 6, 3, 8, 9, 10, 11, 12, 13, 14, 15, 15, 0, 4, 18, 19, 20, 21,
-    22, 23, 24, 25, 26, 27, 3, 4, 5, 6, 5, 8, 3, -1, 9, 6, -1, 8, -1, 16, 17,
-    18, 19, 45, -1, 16, 17, 18, 19, 4, 5, 6, -1, 8, 9, 10, 11, 12, 13, 14, 15,
-    5, 6, 4, 8, 9, 7,
+    1, 2, 3, 5, 6, 3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 16, 0, 21, 19, 20, 21,
+    22, 23, 24, 25, 26, 27, 28, 29, 30, 3, 4, 5, 6, 4, 8, 5, 6, 3, 8, 9, 6, -1,
+    8, -1, 18, 19, 20, 21, -1, -1, -1, 53, 18, 19, 20, 21, 5, 6, -1, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, -1, -1, -1, 21, 22, 4, 5, 6, -1, 8, 9, 10, 11,
+    12, 13, 14, 15, 16, 17, 5, 6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 5,
+    6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 5, -1, 4, -1, 9, 7,
   ];
 }
 const yystos_: byte[] = yystos_init();
 function yystos_init(): byte[] {
   return [
-    0, 3, 6, 8, 16, 17, 18, 19, 22, 23, 24, 25, 23, 23, 23, 3, 26, 0, 5, 6, 8,
-    9, 10, 11, 12, 13, 14, 15, 4, 4, 5, 23, 27, 23, 23, 23, 23, 23, 23, 23, 23,
-    23, 23, 4, 4, 7, 23,
+    0, 3, 6, 8, 18, 19, 20, 21, 25, 26, 27, 28, 29, 27, 27, 27, 3, 30, 0, 5, 6,
+    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 4, 4, 5, 27, 31, 27, 27, 27,
+    27, 27, 27, 27, 27, 27, 27, 27, 27, 21, 4, 4, 7, 27,
   ];
 }
 const yyr1_: byte[] = yyr1_init();
 function yyr1_init(): byte[] {
   return [
-    0, 21, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
-    24, 24, 24, 25, 25, 26, 26, 27, 27,
+    0, 24, 25, 26, 26, 26, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 28, 28, 28, 29, 29, 30, 30, 31, 31,
   ];
 }
 const yyr2_: byte[] = yyr2_init();
 function yyr2_init(): byte[] {
   return [
-    0, 2, 1, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 1, 1, 1, 1, 1, 4, 2, 2,
-    3, 1, 3,
+    0, 2, 1, 1, 3, 2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 3, 3, 1, 1, 1,
+    1, 1, 4, 2, 2, 3, 1, 3,
   ];
 }
 const yyrline_: byte[] = yyrline_init();
 function yyrline_init(): byte[] {
   return [
-    0, 54, 54, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72,
-    76, 77, 78, 82, 83, 87, 88, 92, 93,
+    0, 60, 60, 63, 64, 65, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
+    82, 83, 84, 85, 86, 90, 91, 92, 96, 97, 101, 102, 106, 107,
   ];
 }
 function yytranslate_(t: int): SymbolKind {
-  var code_max: int = 275;
+  var code_max: int = 278;
   if (t <= 0) return SymbolKind.S_YYEOF;
   else if (t <= code_max) return SymbolKind.get(yytranslate_table_[t]);
   else return SymbolKind.S_YYUNDEF;
@@ -128,13 +132,13 @@ function yytranslate_table_init(): byte[] {
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-    18, 19, 20,
+    18, 19, 20, 21, 22, 23,
   ];
 }
-const YYLAST_: int = 67;
+const YYLAST_: int = 118;
 const YYEMPTY_: int = -2;
-const YYFINAL_: int = 17;
-const YYNTOKENS_: int = 21;
+const YYFINAL_: int = 18;
+const YYNTOKENS_: int = 24;
 function i18n(s: String): String {
   return s;
 }
@@ -145,10 +149,10 @@ export class Parser {
     else return new Location(rhs.locationAt(0).end);
   }
   yylexer: Lexer;
-  expression: Expression;
-  constructor(yylexer: Lexer, expression: Expression) {
+  statement: Statement;
+  constructor(yylexer: Lexer, statement: Statement) {
     this.yylexer = yylexer;
-    this.expression = expression;
+    this.statement = statement;
   }
   yyDebugStream: util.PrintStream = util.printStream;
   getDebugStream(): util.PrintStream {
@@ -208,51 +212,37 @@ export class Parser {
     switch (yyn) {
       case 2:
         if (yyn == 2) {
-          this.expression.node = this.yystack.valueAt(0);
-        }
-        break;
-      case 3:
-        if (yyn == 3) {
-          yyval = this.yystack.valueAt(1);
+          this.statement.node = this.yystack.valueAt(0);
         }
         break;
       case 4:
         if (yyn == 4) {
-          yyval = this.yystack.valueAt(0);
+          yyval = this.yystack.valueAt(2);
+          yyval.alias = (this.yystack.valueAt(0) as NameNode).name;
         }
         break;
       case 5:
         if (yyn == 5) {
-          yyval = new InfixNode(
-            this.yystack.valueAt(2),
-            '+',
-            this.yystack.valueAt(0)
-          );
+          yyval = this.yystack.valueAt(1);
+          yyval.alias = (this.yystack.valueAt(0) as NameNode).name;
         }
         break;
       case 6:
         if (yyn == 6) {
-          yyval = new InfixNode(
-            this.yystack.valueAt(2),
-            '-',
-            this.yystack.valueAt(0)
-          );
+          yyval = this.yystack.valueAt(1);
+          yyval.brackets = true;
         }
         break;
       case 7:
         if (yyn == 7) {
-          yyval = new InfixNode(
-            this.yystack.valueAt(2),
-            '*',
-            this.yystack.valueAt(0)
-          );
+          yyval = this.yystack.valueAt(0);
         }
         break;
       case 8:
         if (yyn == 8) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '/',
+            '+',
             this.yystack.valueAt(0)
           );
         }
@@ -261,7 +251,7 @@ export class Parser {
         if (yyn == 9) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '<>',
+            '-',
             this.yystack.valueAt(0)
           );
         }
@@ -270,7 +260,7 @@ export class Parser {
         if (yyn == 10) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '<',
+            '*',
             this.yystack.valueAt(0)
           );
         }
@@ -279,7 +269,7 @@ export class Parser {
         if (yyn == 11) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '<=',
+            '/',
             this.yystack.valueAt(0)
           );
         }
@@ -288,7 +278,7 @@ export class Parser {
         if (yyn == 12) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '>=',
+            '<>',
             this.yystack.valueAt(0)
           );
         }
@@ -297,7 +287,7 @@ export class Parser {
         if (yyn == 13) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '>',
+            '<',
             this.yystack.valueAt(0)
           );
         }
@@ -306,79 +296,124 @@ export class Parser {
         if (yyn == 14) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
-            '=',
+            '<=',
             this.yystack.valueAt(0)
           );
         }
         break;
       case 15:
         if (yyn == 15) {
-          yyval = new PrefixNode('+', this.yystack.valueAt(0));
+          yyval = new InfixNode(
+            this.yystack.valueAt(2),
+            '>=',
+            this.yystack.valueAt(0)
+          );
         }
         break;
       case 16:
         if (yyn == 16) {
-          yyval = new PrefixNode('-', this.yystack.valueAt(0));
+          yyval = new InfixNode(
+            this.yystack.valueAt(2),
+            '>',
+            this.yystack.valueAt(0)
+          );
         }
         break;
       case 17:
         if (yyn == 17) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new InfixNode(
+            this.yystack.valueAt(2),
+            '=',
+            this.yystack.valueAt(0)
+          );
         }
         break;
       case 18:
         if (yyn == 18) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new PrefixNode('+', this.yystack.valueAt(0));
         }
         break;
       case 19:
         if (yyn == 19) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new PrefixNode('-', this.yystack.valueAt(0));
         }
         break;
       case 20:
         if (yyn == 20) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new InfixNode(
+            this.yystack.valueAt(2),
+            'and',
+            this.yystack.valueAt(0)
+          );
         }
         break;
       case 21:
         if (yyn == 21) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new InfixNode(
+            this.yystack.valueAt(2),
+            'or',
+            this.yystack.valueAt(0)
+          );
         }
         break;
       case 22:
         if (yyn == 22) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 23:
+        if (yyn == 23) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 24:
+        if (yyn == 24) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 25:
+        if (yyn == 25) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 26:
+        if (yyn == 26) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 27:
+        if (yyn == 27) {
           yyval = new FunctionCallNode(
             this.yystack.valueAt(3) as NameNode,
             new ListNode('*')
           );
         }
         break;
-      case 23:
-        if (yyn == 23) {
+      case 28:
+        if (yyn == 28) {
           yyval = new FunctionCallNode(
             this.yystack.valueAt(1) as NameNode,
             this.yystack.valueAt(0) as ListNode
           );
         }
         break;
-      case 24:
-        if (yyn == 24) {
+      case 29:
+        if (yyn == 29) {
           yyval = new ListNode();
         }
         break;
-      case 25:
-        if (yyn == 25) {
+      case 30:
+        if (yyn == 30) {
           yyval = this.yystack.valueAt(1);
         }
         break;
-      case 26:
-        if (yyn == 26) {
+      case 31:
+        if (yyn == 31) {
           yyval = new ListNode(this.yystack.valueAt(0));
         }
         break;
-      case 27:
-        if (yyn == 27) {
+      case 32:
+        if (yyn == 32) {
           yyval = this.yystack.valueAt(2);
           (yyval as ListNode).push(this.yystack.valueAt(0));
         }
@@ -651,18 +686,22 @@ class SymbolKind {
   static S_LE: SymbolKind = new SymbolKind(13);
   static S_NE: SymbolKind = new SymbolKind(14);
   static S_GE: SymbolKind = new SymbolKind(15);
-  static S_LOGICAL: SymbolKind = new SymbolKind(16);
-  static S_NUMBER: SymbolKind = new SymbolKind(17);
-  static S_STRING: SymbolKind = new SymbolKind(18);
-  static S_NAME: SymbolKind = new SymbolKind(19);
-  static S_NEG: SymbolKind = new SymbolKind(20);
-  static S_YYACCEPT: SymbolKind = new SymbolKind(21);
-  static S_start: SymbolKind = new SymbolKind(22);
-  static S_expression: SymbolKind = new SymbolKind(23);
-  static S_constant: SymbolKind = new SymbolKind(24);
-  static S_function_call: SymbolKind = new SymbolKind(25);
-  static S_argument_list: SymbolKind = new SymbolKind(26);
-  static S_non_empty_argument_list: SymbolKind = new SymbolKind(27);
+  static S_AND: SymbolKind = new SymbolKind(16);
+  static S_OR: SymbolKind = new SymbolKind(17);
+  static S_LOGICAL: SymbolKind = new SymbolKind(18);
+  static S_NUMBER: SymbolKind = new SymbolKind(19);
+  static S_STRING: SymbolKind = new SymbolKind(20);
+  static S_NAME: SymbolKind = new SymbolKind(21);
+  static S_AS: SymbolKind = new SymbolKind(22);
+  static S_NEG: SymbolKind = new SymbolKind(23);
+  static S_YYACCEPT: SymbolKind = new SymbolKind(24);
+  static S_start: SymbolKind = new SymbolKind(25);
+  static S_statement: SymbolKind = new SymbolKind(26);
+  static S_expression: SymbolKind = new SymbolKind(27);
+  static S_constant: SymbolKind = new SymbolKind(28);
+  static S_function_call: SymbolKind = new SymbolKind(29);
+  static S_argument_list: SymbolKind = new SymbolKind(30);
+  static S_non_empty_argument_list: SymbolKind = new SymbolKind(31);
   yycode_: int;
   constructor(n: int) {
     this.yycode_ = n;
@@ -684,13 +723,17 @@ class SymbolKind {
     SymbolKind.S_LE,
     SymbolKind.S_NE,
     SymbolKind.S_GE,
+    SymbolKind.S_AND,
+    SymbolKind.S_OR,
     SymbolKind.S_LOGICAL,
     SymbolKind.S_NUMBER,
     SymbolKind.S_STRING,
     SymbolKind.S_NAME,
+    SymbolKind.S_AS,
     SymbolKind.S_NEG,
     SymbolKind.S_YYACCEPT,
     SymbolKind.S_start,
+    SymbolKind.S_statement,
     SymbolKind.S_expression,
     SymbolKind.S_constant,
     SymbolKind.S_function_call,
@@ -722,13 +765,17 @@ class SymbolKind {
       '<=',
       '<>',
       '>=',
+      'and',
+      'or',
       i18n('logical constant'),
       i18n('numeric constant'),
       i18n('string constant'),
       i18n('name'),
+      'AS',
       'NEG',
       '$accept',
       'start',
+      'statement',
       'expression',
       'constant',
       'function_call',
@@ -757,11 +804,14 @@ export const GT: int = 267;
 export const LE: int = 268;
 export const NE: int = 269;
 export const GE: int = 270;
-export const LOGICAL: int = 271;
-export const NUMBER: int = 272;
-export const STRING: int = 273;
-export const NAME: int = 274;
-export const NEG: int = 275;
+export const AND: int = 271;
+export const OR: int = 272;
+export const LOGICAL: int = 273;
+export const NUMBER: int = 274;
+export const STRING: int = 275;
+export const NAME: int = 276;
+export const AS: int = 277;
+export const NEG: int = 278;
 export const EOF: int = YYEOF;
 export interface Lexer {
   yyerror(loc: Location, msg: String): void;

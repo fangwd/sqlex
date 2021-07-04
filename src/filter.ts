@@ -6,6 +6,16 @@ import {
   getUniqueFields
 } from './database';
 import { Record } from './record';
+import {
+  FunctionCallNode,
+  InfixNode,
+  Kind,
+  ListNode,
+  NameNode,
+  Node as AST,
+  PrefixNode,
+  Statement,
+} from './parser/ast';
 
 import {
   Model,
@@ -18,6 +28,8 @@ import {
 import { Document, Value } from './types';
 import { DialectEncoder } from './engine';
 import { toArray } from './misc';
+import Lexer from './parser/lexer';
+import { Parser, YYEOF, YYPUSH_MORE } from './parser/parser';
 
 export interface AliasEntry {
   name: string;
@@ -319,15 +331,22 @@ export class QueryBuilder {
   }
 
   _select(
-    name: string | SimpleField | Document,
+    name: string | SimpleField | Document | AST[],
     filter: Filter = {},
     orderBy?: OrderBy
   ): SelectQuery {
     this.froms = [`${this.escapeId(this.model)} ${this.alias || ''}`];
 
     if (!(name instanceof Field || typeof name === 'string')) {
-      // { code: 'ID', user: { firstName: 'name' } }
-      extendFilter(this.model, filter, name as Document);
+      if (Array.isArray(name)) {
+        for (const ast of name) {
+          extendByAst(this.model, filter, ast);
+        }
+      }
+      else {
+        // { code: 'ID', user: { firstName: 'name' } }
+        extendFilter(this.model, filter, name as Document);
+      }
     }
 
     if (orderBy) {
@@ -335,12 +354,15 @@ export class QueryBuilder {
       filter = this._extendFilter(filter, orderBy);
     }
 
+    // todo: group by
+
     const where = this.where(filter).trim();
 
     let fields = [];
     if (name instanceof Field || typeof name === 'string') {
       fields.push(this.encodeField(name));
     } else if (Array.isArray(name)) {
+      // todo: get fields for asts
       name.forEach(name =>
         fields.push(this.encodeField(this.model.field(name) as SimpleField))
       );
@@ -369,12 +391,16 @@ export class QueryBuilder {
   }
 
   select(
-    name: string | SimpleField | Document,
+    name: string | SimpleField | Document | string[],
     filter?: Filter,
     orderBy?: OrderBy,
     filterThunk?: (QueryBuilder) => string
   ): string {
-    const query = this._select(name, filter, orderBy);
+    const query = this._select(
+      Array.isArray(name) ? name.map((entry) => parse(entry)) : name,
+      filter,
+      orderBy
+    );
     let sql = `select ${query.fields} from ${query.tables}`;
     if (query.where) {
       sql += ` where ${query.where}`;
@@ -557,7 +583,10 @@ export function plainify(value) {
   }
 }
 
-function pkOnly(doc: Document, model: Model) {
+function pkOnly(doc: Document|string, model: Model) {
+  if (typeof doc === 'string') {
+    return doc === model.keyField().name;
+  }
   if (doc && !isValue(doc)) {
     const keys = Object.keys(doc);
     return keys.length === 1 && keys[0] === model.keyField().name;
@@ -588,6 +617,54 @@ function extendFilter(model: Model, filter: Filter, fields: Document) {
         );
       }
     }
+  }
+}
+
+// name: order.user.email
+function extendByFieldName(model: Model, filter: Filter, dotted: string) {
+  const dot = dotted.indexOf('.');
+
+  if (dot < 0) {
+    return;
+  }
+
+  const name = dotted.substring(0, dot);
+  const field = model.field(name);
+  const doc = dotted.substring(dot + 1);
+
+  if (field instanceof ForeignKeyField) {
+    if (!filter[name]) {
+      filter[name] = {};
+    }
+    if (!pkOnly(doc, field.referencedField.model)) {
+      filter[name]['*'] = true;
+    }
+    extendByFieldName(field.referencedField.model, filter[name], doc);
+  }
+}
+
+function extendByAst(model: Model, filter: Filter, ast: AST) {
+  switch (ast.kind) {
+    case Kind.NAME:
+      extendByFieldName(model, filter, (ast as NameNode).name);
+      break;
+    case Kind.INFIX:
+      extendByAst(model, filter, (ast as InfixNode).lhs);
+      extendByAst(model, filter, (ast as InfixNode).rhs);
+      break;
+    case Kind.FCALL:
+      extendByAst(model, filter, (ast as FunctionCallNode).args);
+      break;
+    case Kind.LIST:
+      for (const entry of (ast as ListNode).list) {
+        extendByAst(model, filter, entry);
+      }
+      break;
+    case Kind.PREFIX:
+      extendByAst(model, filter, (ast as PrefixNode).expr);
+      break;
+    default:
+      break;
   }
 }
 
@@ -636,4 +713,17 @@ function getFields(
   }
 
   return result;
+}
+
+function parse(formula: string): AST | undefined {
+  const lexer = new Lexer(formula);
+  const result: Statement = {};
+  const parser = new Parser(lexer, result);
+  do {
+    const token = lexer.lex();
+    const yyloc = lexer.getLocation();
+    if (parser.push_parse(token, lexer.value!, yyloc) !== YYPUSH_MORE) {
+      return token === YYEOF ? result.node : undefined;
+    }
+  } while (true);
 }

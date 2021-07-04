@@ -8,7 +8,9 @@ export type InfixOperator =
   | '<'
   | '<='
   | '>'
-  | '>=';
+  | '>='
+  | 'and'
+  | 'or';
 
 export type PrefixOperator = '+' | '-' | '@';
 
@@ -24,6 +26,8 @@ export enum Kind {
 
 export class Node {
   kind: Kind;
+  brackets?: boolean; // honour the user's choice of using '(' and ')'
+  alias?: string;
   constructor(kind: Kind) {
     this.kind = kind;
   }
@@ -125,6 +129,6 @@ export class ListNode extends Node {
   }
 }
 
-export class Expression {
+export class Statement {
   node?: Node;
 }
