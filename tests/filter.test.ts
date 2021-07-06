@@ -247,3 +247,22 @@ test('plainify', () => {
   const result = plainify(value);
   expect(result).toEqual([1, 2]);
 });
+
+
+test('group by', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const connection = await db.pool.getConnection();
+  const rows = await db.table('order_item').select(
+    ['order.user.email', 'count(*) as itemCount', 'sum(quantity) as totalQuantity'],
+    {
+      groupBy: ['order.id', 'order.user.email'],
+    },
+    undefined,
+    connection
+  );
+  expect(rows.length).toBe(2);
+  expect((rows[0] as any).itemCount > 0);
+  expect((rows[1] as any).totalQuantity > 0);
+  connection.release();
+  db.end();
+});

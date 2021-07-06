@@ -127,7 +127,20 @@ export class Model {
     );
   }
 
-  field(name: string): Field | undefined {
+  field(name: string|string[]): Field | undefined {
+    if (Array.isArray(name)) {
+      let model:Model = this;
+      for (let i = 0; i < name.length - 1; i++) {
+        const field = model.field(name[i]);
+        if (field instanceof ForeignKeyField) {
+          model = field.referencedField.model;
+        }
+        else {
+          throw Error(`Invalid field: ${name.join('.')}`)
+        }
+      }
+      return model.field(name[name.length-1]);
+    }
     return this.fieldMap.get(name);
   }
 

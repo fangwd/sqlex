@@ -132,3 +132,60 @@ export class ListNode extends Node {
 export class Statement {
   node?: Node;
 }
+
+type Encoder = (s: string) => string;
+
+export type RewriteOptions = {
+  func?: Encoder;
+  name: Encoder;
+  text: Encoder;
+};
+
+function encodeValue(ast: ValueNode, encoder: (s: string) => string) {
+  switch (ast.type) {
+    case ValueType.LOGICAL:
+      return (ast as LogicalValueNode).value ? 'true' : 'false';
+    case ValueType.NUMBER:
+      return (ast as NumberValueNode).value + '';
+    case ValueType.STRING:
+      return encoder((ast as StringValueNode).value);
+  }
+}
+
+export function rewrite(ast: Node, options: RewriteOptions) {
+  let result: string;
+  switch (ast.kind) {
+    case Kind.NAME:
+      result = options.name((ast as NameNode).name);
+      break;
+    case Kind.INFIX:
+      result =
+        rewrite((ast as InfixNode).lhs, options) +
+        (ast as InfixNode).op +
+        rewrite((ast as InfixNode).rhs, options);
+      break;
+    case Kind.FCALL:
+      result =
+        (options.func
+          ? options.func((ast as FunctionCallNode).name.name)
+          : (ast as FunctionCallNode).name.name) +
+        '(' +
+        rewrite((ast as FunctionCallNode).args, options) +
+        ')';
+      break;
+    case Kind.LIST:
+      result = (ast as ListNode).list.map((e) => rewrite(e, options)).join(',');
+      break;
+    case Kind.PREFIX:
+      result =
+        (ast as PrefixNode).op + rewrite((ast as PrefixNode).expr, options);
+      break;
+    case Kind.STAR:
+      result = '*';
+      break;
+    case Kind.VALUE:
+      result = encodeValue(ast as ValueNode, options.text);
+      break;
+  }
+  return ast.brackets ? `(${result})` : result;
+}

@@ -27,13 +27,16 @@ test('symbols', () => {
   expect(lexer.lex()).toBe(Token.YYEOF);
 });
 
-test('logical', () => {
-  const text = 'True False';
+test('keywords', () => {
+  const text = 'True False and or as';
   const lexer = new Lexer(text);
   expect(lexer.lex()).toBe(Token.LOGICAL);
   expect(lexer.value).toEqual(new LogicalValueNode(true));
   expect(lexer.lex()).toBe(Token.LOGICAL);
   expect(lexer.value).toEqual(new LogicalValueNode(false));
+  expect(lexer.lex()).toBe(Token.AND);
+  expect(lexer.lex()).toBe(Token.OR);
+  expect(lexer.lex()).toBe(Token.AS);
 });
 
 test('number', () => {
@@ -88,7 +91,7 @@ test('string', () => {
 });
 
 test('name', () => {
-  const text = 'name 中文.1 special _第2';
+  const text = 'name 中文.1 special _第2 `foo bar` "blah blah"';
   const lexer = new Lexer(text);
 
   expect(lexer.lex()).toBe(Token.NAME);
@@ -102,4 +105,10 @@ test('name', () => {
 
   expect(lexer.lex()).toBe(Token.NAME);
   expect(lexer.value).toEqual(new NameNode('_第2'));
+
+  expect(lexer.lex()).toBe(Token.NAME);
+  expect(lexer.value).toEqual(new NameNode('foo bar'));
+
+  expect(lexer.lex()).toBe(Token.NAME);
+  expect(lexer.value).toEqual(new NameNode('blah blah'));
 });

@@ -34,6 +34,7 @@ import { toArray } from './misc';
 import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
 import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
+import { parse } from './parser';
 
 export class ClosureTable {
   constructor(
@@ -198,6 +199,7 @@ export interface SelectOptions {
   offset?: number;
   limit?: number;
   orderBy?: OrderBy;
+  groupBy?: string[];
 }
 
 export class Table {
@@ -246,7 +248,7 @@ export class Table {
   }
 
   async select(
-    fields: string | Document,
+    fields: string | Document | string[],
     options: SelectOptions = {},
     filterThunk?: (builder: QueryBuilder) => string,
     connection?: Connection
@@ -258,7 +260,9 @@ export class Table {
         options,
         filterThunk
       );
-      await this._resolveRelatedFields(connection, result, fields);
+      if (!Array.isArray(fields)) {
+        await this._resolveRelatedFields(connection, result, fields);
+      }
       return result;
     }
     connection = await this.db.pool.getConnection();
@@ -269,7 +273,9 @@ export class Table {
         options,
         filterThunk
       );
-      await this._resolveRelatedFields(connection, result, fields);
+      if (!Array.isArray(fields)) {
+        await this._resolveRelatedFields(connection, result, fields);
+      }
       connection.release();
       return result;
     } catch (error) {
@@ -475,7 +481,7 @@ export class Table {
 
   private _select(
     connection: Connection,
-    fields: string | Document,
+    fields: string | Document | string[],
     options: SelectOptions = {},
     filterThunk?: (builder: QueryBuilder) => string
   ): Promise<Row[]> {
@@ -485,6 +491,7 @@ export class Table {
       fields,
       options.where,
       options.orderBy,
+      options.groupBy,
       filterThunk
     );
 
@@ -496,6 +503,9 @@ export class Table {
     }
     return connection.query(sql).then(rows => {
       return rows.map(row => {
+        if (Array.isArray(fields)) {
+          return row;
+        }
         const doc = toDocument(row, this.model, builder.fieldMap);
         if (filterThunk) {
           for (const key in row) {

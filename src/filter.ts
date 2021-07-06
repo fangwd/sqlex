@@ -14,7 +14,7 @@ import {
   NameNode,
   Node as AST,
   PrefixNode,
-  Statement,
+  rewrite,
 } from './parser/ast';
 
 import {
@@ -28,8 +28,7 @@ import {
 import { Document, Value } from './types';
 import { DialectEncoder } from './engine';
 import { toArray } from './misc';
-import Lexer from './parser/lexer';
-import { Parser, YYEOF, YYPUSH_MORE } from './parser/parser';
+import { parse } from './parser/index';
 
 export interface AliasEntry {
   name: string;
@@ -41,6 +40,7 @@ export interface SelectQuery {
   tables: string;
   where?: string;
   orderBy?: string;
+  groupBy?: string;
 }
 
 export class Context {
@@ -120,12 +120,12 @@ export class QueryBuilder {
   }
 
   private or(args: Filter[]): string {
-    const exprs = args.map(arg => this.and(arg));
+    const exprs = args.map((arg) => this.and(arg));
     return exprs.length === 0
       ? ''
       : exprs.length === 1
       ? exprs[0]
-      : exprs.map(x => `(${x})`).join(' or ');
+      : exprs.map((x) => `(${x})`).join(' or ');
   }
 
   private and(args: Filter): string {
@@ -178,7 +178,7 @@ export class QueryBuilder {
               let filter = query[keys[0]] as Filter;
               if (relatedField.throughField && relatedField.name === keys[0]) {
                 filter = {
-                  [relatedField.throughField.name]: filter
+                  [relatedField.throughField.name]: filter,
                 };
               }
               const rhs = builder.select(referencingField, filter);
@@ -201,7 +201,7 @@ export class QueryBuilder {
         exprs.push(this.exists(field, operator, filter));
       } else if (key === AND) {
         // { and: [{name_like: "%Apple%"}, {price_lt: 6}] }
-        exprs.push(value.map(c => this.and(c)).join(' and '));
+        exprs.push(value.map((c) => this.and(c)).join(' and '));
       } else if (key === OR) {
         /*
          { or: [
@@ -212,7 +212,7 @@ export class QueryBuilder {
               ]
          }
          */
-        exprs.push('(' + value.map(c => this.and(c)).join(' or ') + ')');
+        exprs.push('(' + value.map((c) => this.and(c)).join(' or ') + ')');
       } else if (key === NOT) {
         /*
          { not: [
@@ -224,7 +224,9 @@ export class QueryBuilder {
          }
          */
         const filters = toArray(value);
-        exprs.push('not (' + filters.map(c => this.and(c)).join(' or ') + ')');
+        exprs.push(
+          'not (' + filters.map((c) => this.and(c)).join(' or ') + ')'
+        );
       } else if (name !== '*') {
         throw Error(`Bad field: ${this.model.name}.${name}`);
       }
@@ -233,7 +235,7 @@ export class QueryBuilder {
       ? ''
       : exprs.length === 1
       ? exprs[0]
-      : exprs.map(x => `(${x})`).join(' and ');
+      : exprs.map((x) => `(${x})`).join(' and ');
   }
 
   private expr(field: SimpleField, operator: string, value: Value | Value[]) {
@@ -241,8 +243,8 @@ export class QueryBuilder {
     if (Array.isArray(value)) {
       if (!operator || operator === 'in') {
         const values = value
-          .filter(value => value !== null)
-          .map(value => this.escape(field, value));
+          .filter((value) => value !== null)
+          .map((value) => this.escape(field, value));
         if (values.length < value.length) {
           return values.length === 0
             ? `${lhs} is null`
@@ -296,11 +298,11 @@ export class QueryBuilder {
     return filter;
   }
 
-  _pushField(fields: string[], path: string) {
+  _resolveField(path: string): { column: string; alias?: string } {
     const aliasMap = this.context.aliasMap;
     let alias: string, field: Field;
 
-    const match = /^(.+)\.([^\.]+)/.exec(path);
+    const match = /^(.+)\.([^\.]+)$/.exec(path);
 
     if (match) {
       const entry = aliasMap[match[1]];
@@ -320,20 +322,26 @@ export class QueryBuilder {
       const column = `${this.escapeId(alias)}.${this.escapeId(field)}`;
       if (match) {
         const name = this.escapeId(path.replace(/\./g, '__'));
-        fields.push(`${column} as ${name}`);
+        return { column, alias: name };
       } else {
-        fields.push(`${column}`);
+        return { column };
       }
-      return column;
     }
 
     throw new Error(`Invalid field: ${path}`);
   }
 
+  _pushField(fields: string[], path: string) {
+    const {column, alias} = this._resolveField(path);
+    fields.push(alias ? `${column} as ${alias}` : column)
+    return column;
+  }
+
   _select(
     name: string | SimpleField | Document | AST[],
     filter: Filter = {},
-    orderBy?: OrderBy
+    orderBy?: OrderBy,
+    groupBy?: string[],
   ): SelectQuery {
     this.froms = [`${this.escapeId(this.model)} ${this.alias || ''}`];
 
@@ -342,19 +350,18 @@ export class QueryBuilder {
         for (const ast of name) {
           extendByAst(this.model, filter, ast);
         }
-      }
-      else {
+      } else {
         // { code: 'ID', user: { firstName: 'name' } }
         extendFilter(this.model, filter, name as Document);
       }
     }
 
+    // todo: extend by group by
+
     if (orderBy) {
       // orderBy: ['-user.email']
       filter = this._extendFilter(filter, orderBy);
     }
-
-    // todo: group by
 
     const where = this.where(filter).trim();
 
@@ -362,15 +369,33 @@ export class QueryBuilder {
     if (name instanceof Field || typeof name === 'string') {
       fields.push(this.encodeField(name));
     } else if (Array.isArray(name)) {
-      // todo: get fields for asts
-      name.forEach(name =>
-        fields.push(this.encodeField(this.model.field(name) as SimpleField))
-      );
+      const options = {
+        name: (path:string) => this._resolveField(path).column,
+        text: (str:string) => this.dialect.escape(str),
+      }
+      name.forEach((ast) => {
+        const name = rewrite(ast, options);
+        let alias;
+        if (ast.alias) {
+          alias = this.dialect.escapeId(ast.alias);
+        }
+        else if (ast.kind === Kind.NAME) {
+          const field = this.model.field((ast as NameNode).name.split('.'));
+          alias = this.dialect.escapeId(field.name);
+        }
+        fields.push(alias ? `${name} as ${alias}` : name);
+      });
     } else {
       const names = getFields(this.model, name, this.fieldMap);
       for (const key of names) {
         this._pushField(fields, key);
       }
+    }
+
+    let groupByPart = undefined;
+
+    if (groupBy) {
+      groupByPart = groupBy.map(field => this._resolveField(field).column).join(',');
     }
 
     if (orderBy) {
@@ -386,7 +411,8 @@ export class QueryBuilder {
       fields: fields.join(', '),
       tables: this.froms.join(' left join '),
       where,
-      orderBy: orderBy ? (orderBy as string[]).join(', ') : null
+      orderBy: orderBy ? (orderBy as string[]).join(', ') : null,
+      groupBy: groupByPart,
     };
   }
 
@@ -394,12 +420,14 @@ export class QueryBuilder {
     name: string | SimpleField | Document | string[],
     filter?: Filter,
     orderBy?: OrderBy,
+    groupBy?: string[],
     filterThunk?: (QueryBuilder) => string
   ): string {
     const query = this._select(
       Array.isArray(name) ? name.map((entry) => parse(entry)) : name,
       filter,
-      orderBy
+      orderBy,
+      groupBy
     );
     let sql = `select ${query.fields} from ${query.tables}`;
     if (query.where) {
@@ -415,6 +443,9 @@ export class QueryBuilder {
         }
         sql += `(${extra})`;
       }
+    }
+    if (query.groupBy) {
+      sql += ` group by ${query.groupBy}`;
     }
     if (query.orderBy) {
       sql += ` order by ${query.orderBy}`;
@@ -713,17 +744,4 @@ function getFields(
   }
 
   return result;
-}
-
-function parse(formula: string): AST | undefined {
-  const lexer = new Lexer(formula);
-  const result: Statement = {};
-  const parser = new Parser(lexer, result);
-  do {
-    const token = lexer.lex();
-    const yyloc = lexer.getLocation();
-    if (parser.push_parse(token, lexer.value!, yyloc) !== YYPUSH_MORE) {
-      return token === YYEOF ? result.node : undefined;
-    }
-  } while (true);
 }
