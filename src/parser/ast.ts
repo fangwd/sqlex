@@ -10,9 +10,10 @@ export type InfixOperator =
   | '>'
   | '>='
   | 'and'
-  | 'or';
+  | 'or'
+  | 'is';
 
-export type PrefixOperator = '+' | '-' | '@';
+export type PrefixOperator = '+' | '-' | 'not';
 
 export enum Kind {
   INFIX,
@@ -59,6 +60,7 @@ export enum ValueType {
   LOGICAL,
   NUMBER,
   STRING,
+  NULL,
 }
 
 export class ValueNode extends Node {
@@ -93,6 +95,18 @@ export class StringValueNode extends ValueNode {
   }
 }
 
+export class NullValueNode extends ValueNode {
+  constructor() {
+    super(ValueType.NULL);
+  }
+}
+
+export class StarNode extends Node {
+  constructor() {
+    super(Kind.STAR);
+  }
+}
+
 export class NameNode extends Node {
   name: string;
   constructor(name: string) {
@@ -113,15 +127,11 @@ export class FunctionCallNode extends Node {
 
 export class ListNode extends Node {
   list: Node[];
-  constructor(node?: Node | '*') {
+  constructor(node?: Node) {
     super(Kind.LIST);
     this.list = [];
     if (node !== undefined) {
-      if (node === '*') {
-        this.list.push(new Node(Kind.STAR));
-      } else {
-        this.list.push(node);
-      }
+      this.list.push(node);
     }
   }
   push(node: Node) {
@@ -149,6 +159,8 @@ function encodeValue(ast: ValueNode, encoder: (s: string) => string) {
       return (ast as NumberValueNode).value + '';
     case ValueType.STRING:
       return encoder((ast as StringValueNode).value);
+    case ValueType.NULL:
+      return 'null';
   }
 }
 
@@ -161,7 +173,9 @@ export function rewrite(ast: Node, options: RewriteOptions) {
     case Kind.INFIX:
       result =
         rewrite((ast as InfixNode).lhs, options) +
+        ' ' +
         (ast as InfixNode).op +
+        ' ' +
         rewrite((ast as InfixNode).rhs, options);
       break;
     case Kind.FCALL:
@@ -178,7 +192,9 @@ export function rewrite(ast: Node, options: RewriteOptions) {
       break;
     case Kind.PREFIX:
       result =
-        (ast as PrefixNode).op + rewrite((ast as PrefixNode).expr, options);
+        (ast as PrefixNode).op +
+        ((ast as PrefixNode).op === 'not' ? ' ' : '') +
+        rewrite((ast as PrefixNode).expr, options);
       break;
     case Kind.STAR:
       result = '*';

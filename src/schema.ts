@@ -127,8 +127,9 @@ export class Model {
     );
   }
 
-  field(name: string|string[]): Field | undefined {
-    if (Array.isArray(name)) {
+  field(fullname: string): Field | undefined {
+    if (fullname.indexOf('.') > -1) {
+      const name = fullname.split('.');
       let model:Model = this;
       for (let i = 0; i < name.length - 1; i++) {
         const field = model.field(name[i]);
@@ -141,7 +142,7 @@ export class Model {
       }
       return model.field(name[name.length-1]);
     }
-    return this.fieldMap.get(name);
+    return this.fieldMap.get(fullname);
   }
 
   keyField(): SimpleField | undefined {
@@ -343,6 +344,10 @@ export class Model {
       }
     }
   }
+
+  alias(field:string) {
+    return this.table.name;
+  }
 }
 
 export class Field {
@@ -368,11 +373,20 @@ export class Field {
 }
 
 export class SimpleField extends Field {
+  formula?: string;
   column: types.Column;
 
   constructor(model: Model, column: types.Column, config: FieldConfig) {
     super(config.name || toCamelCase(column.name), model, config);
     this.column = column;
+  }
+}
+
+export class ComputedField extends Field {
+  formula: any; // string or parsed expression
+  constructor(model: Model, formula: any, name: string) {
+    super(name, model, {});
+    this.formula = formula;
   }
 }
 

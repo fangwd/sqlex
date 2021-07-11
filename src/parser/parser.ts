@@ -6,6 +6,7 @@ import {
   NameNode,
   FunctionCallNode,
   ListNode,
+  StarNode,
 } from './ast';
 import * as util from './util';
 import Position from './position';
@@ -35,85 +36,88 @@ function yyPactValueIsDefault(yyvalue: int): boolean {
 function yyTableValueIsError(yyvalue: int): boolean {
   return yyvalue == yytable_ninf_;
 }
-const yypact_ninf_: byte = -5;
+const yypact_ninf_: byte = -4;
 const yytable_ninf_: byte = -1;
 const yypact_: byte[] = yypact_init();
 function yypact_init(): byte[] {
   return [
-    35, 35, 35, 35, -5, -5, -5, 2, 16, -5, 52, -5, -5, 71, -5, -5, 27, -5, -5,
-    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, -5, -4, -5, -5, 30, 84, 111,
-    -5, 108, 108, -5, 31, 31, 31, 31, 31, 31, 97, -2, -5, -5, -5, 35, 84,
+    44, 44, -4, 44, 44, 44, -4, -4, -4, -2, -4, 7, -4, 64, -4, -4, 86, -4, -4,
+    125, 38, -4, -4, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, -4, -3,
+    -4, -4, 0, 33, -4, 46, 46, -4, 30, 30, 30, 30, 30, 30, 114, 100, 125, -4,
+    -4, 44, 0,
   ];
 }
 const yydefact_: byte[] = yydefact_init();
 function yydefact_init(): byte[] {
   return [
-    0, 0, 0, 0, 24, 25, 26, 23, 0, 2, 3, 7, 22, 0, 18, 19, 0, 28, 1, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 6, 29, 0, 31, 0, 10, 8, 9, 11, 13, 17, 16, 14,
-    12, 15, 20, 21, 4, 27, 30, 0, 32,
+    0, 0, 26, 0, 0, 0, 27, 28, 29, 25, 30, 0, 2, 3, 7, 24, 0, 18, 19, 20, 0, 31,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 6, 32, 34, 0, 10, 8, 9, 11,
+    13, 17, 16, 14, 12, 15, 21, 22, 23, 4, 33, 0, 35,
   ];
 }
 const yypgoto_: byte[] = yypgoto_init();
 function yypgoto_init(): byte[] {
-  return [-5, -5, -5, -1, -5, -5, -5, -5];
+  return [-4, -4, -4, -1, -4, -4, -4, -4];
 }
 const yydefgoto_: byte[] = yydefgoto_init();
 function yydefgoto_init(): byte[] {
-  return [0, 8, 9, 10, 11, 12, 17, 37];
+  return [0, 11, 12, 13, 14, 15, 21, 41];
 }
 const yytable_: byte[] = yytable_init();
 function yytable_init(): byte[] {
   return [
-    13, 14, 15, 19, 20, 16, 21, 22, 23, 24, 25, 26, 27, 28, 29, 36, 18, 50, 38,
-    39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 1, 34, 35, 2, 51, 3, 19, 20, 1,
-    21, 22, 2, 0, 3, 0, 4, 5, 6, 7, 0, 0, 0, 54, 4, 5, 6, 7, 19, 20, 0, 21, 22,
-    23, 24, 25, 26, 27, 28, 29, 30, 0, 0, 0, 31, 32, 33, 19, 20, 0, 21, 22, 23,
-    24, 25, 26, 27, 28, 29, 30, 19, 20, 0, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-    30, 19, 20, 0, 21, 22, 23, 24, 25, 26, 27, 28, 19, 0, 52, 0, 22, 53,
+    16, 20, 17, 18, 19, 23, 24, 22, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+    40, 55, 0, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 23, 24, 56,
+    25, 26, 57, 1, 39, 2, 3, 0, 4, 1, 0, 2, 3, 23, 4, 0, 0, 26, 58, 5, 6, 7, 8,
+    9, 10, 5, 6, 7, 8, 9, 10, 23, 24, 0, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
+    35, 0, 0, 0, 0, 36, 0, 37, 38, 23, 24, 0, 25, 26, 27, 28, 29, 30, 31, 32,
+    33, 34, 35, 23, 24, 0, 25, 26, 27, 28, 29, 30, 31, 32, 33, 0, 35, 23, 24, 0,
+    25, 26, 27, 28, 29, 30, 31, 32, 23, 24, 35, 25, 26, 27, 28, 29, 30, 31, 32,
   ];
 }
 const yycheck_: byte[] = yycheck_init();
 function yycheck_init(): byte[] {
   return [
-    1, 2, 3, 5, 6, 3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 16, 0, 21, 19, 20, 21,
-    22, 23, 24, 25, 26, 27, 28, 29, 30, 3, 4, 5, 6, 4, 8, 5, 6, 3, 8, 9, 6, -1,
-    8, -1, 18, 19, 20, 21, -1, -1, -1, 53, 18, 19, 20, 21, 5, 6, -1, 8, 9, 10,
-    11, 12, 13, 14, 15, 16, 17, -1, -1, -1, 21, 22, 4, 5, 6, -1, 8, 9, 10, 11,
-    12, 13, 14, 15, 16, 17, 5, 6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 5,
-    6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 5, -1, 4, -1, 9, 7,
+    1, 3, 3, 4, 5, 5, 6, 0, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 23,
+    -1, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 5, 6, 4, 8, 9, 7, 3,
+    4, 5, 6, -1, 8, 3, -1, 5, 6, 5, 8, -1, -1, 9, 57, 19, 20, 21, 22, 23, 24,
+    19, 20, 21, 22, 23, 24, 5, 6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+    -1, -1, -1, -1, 23, -1, 25, 4, 5, 6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+    17, 18, 5, 6, -1, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, 18, 5, 6, -1, 8, 9,
+    10, 11, 12, 13, 14, 15, 5, 6, 18, 8, 9, 10, 11, 12, 13, 14, 15,
   ];
 }
 const yystos_: byte[] = yystos_init();
 function yystos_init(): byte[] {
   return [
-    0, 3, 6, 8, 18, 19, 20, 21, 25, 26, 27, 28, 29, 27, 27, 27, 3, 30, 0, 5, 6,
-    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 4, 4, 5, 27, 31, 27, 27, 27,
-    27, 27, 27, 27, 27, 27, 27, 27, 27, 21, 4, 4, 7, 27,
+    0, 3, 5, 6, 8, 19, 20, 21, 22, 23, 24, 28, 29, 30, 31, 32, 30, 30, 30, 30,
+    3, 33, 0, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 23, 25, 4, 4, 30,
+    34, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 23, 4, 7, 30,
   ];
 }
 const yyr1_: byte[] = yyr1_init();
 function yyr1_init(): byte[] {
   return [
-    0, 24, 25, 26, 26, 26, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
-    27, 27, 27, 27, 27, 28, 28, 28, 29, 29, 30, 30, 31, 31,
+    0, 27, 28, 29, 29, 29, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+    30, 30, 30, 30, 30, 30, 30, 30, 31, 31, 31, 31, 32, 33, 33, 34, 34,
   ];
 }
 const yyr2_: byte[] = yyr2_init();
 function yyr2_init(): byte[] {
   return [
-    0, 2, 1, 1, 3, 2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 3, 3, 1, 1, 1,
-    1, 1, 4, 2, 2, 3, 1, 3,
+    0, 2, 1, 1, 3, 2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 3, 3, 3, 1,
+    1, 1, 1, 1, 1, 1, 2, 2, 3, 1, 3,
   ];
 }
 const yyrline_: byte[] = yyrline_init();
 function yyrline_init(): byte[] {
   return [
-    0, 60, 60, 63, 64, 65, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
-    82, 83, 84, 85, 86, 90, 91, 92, 96, 97, 101, 102, 106, 107,
+    0, 65, 65, 68, 69, 70, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86,
+    87, 88, 89, 90, 91, 92, 93, 94, 98, 99, 100, 101, 105, 109, 110, 114, 115,
   ];
 }
 function yytranslate_(t: int): SymbolKind {
-  var code_max: int = 278;
+  var code_max: int = 281;
   if (t <= 0) return SymbolKind.S_YYEOF;
   else if (t <= code_max) return SymbolKind.get(yytranslate_table_[t]);
   else return SymbolKind.S_YYUNDEF;
@@ -132,13 +136,13 @@ function yytranslate_table_init(): byte[] {
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-    18, 19, 20, 21, 22, 23,
+    18, 19, 20, 21, 22, 23, 24, 25, 26,
   ];
 }
-const YYLAST_: int = 118;
+const YYLAST_: int = 140;
 const YYEMPTY_: int = -2;
-const YYFINAL_: int = 18;
-const YYNTOKENS_: int = 24;
+const YYFINAL_: int = 22;
+const YYNTOKENS_: int = 27;
 function i18n(s: String): String {
   return s;
 }
@@ -340,6 +344,11 @@ export class Parser {
         break;
       case 20:
         if (yyn == 20) {
+          yyval = new PrefixNode('not', this.yystack.valueAt(0));
+        }
+        break;
+      case 21:
+        if (yyn == 21) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
             'and',
@@ -347,8 +356,8 @@ export class Parser {
           );
         }
         break;
-      case 21:
-        if (yyn == 21) {
+      case 22:
+        if (yyn == 22) {
           yyval = new InfixNode(
             this.yystack.valueAt(2),
             'or',
@@ -356,14 +365,13 @@ export class Parser {
           );
         }
         break;
-      case 22:
-        if (yyn == 22) {
-          yyval = this.yystack.valueAt(0);
-        }
-        break;
       case 23:
         if (yyn == 23) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new InfixNode(
+            this.yystack.valueAt(2),
+            'is',
+            this.yystack.valueAt(0)
+          );
         }
         break;
       case 24:
@@ -378,42 +386,54 @@ export class Parser {
         break;
       case 26:
         if (yyn == 26) {
-          yyval = this.yystack.valueAt(0);
+          yyval = new StarNode();
         }
         break;
       case 27:
         if (yyn == 27) {
-          yyval = new FunctionCallNode(
-            this.yystack.valueAt(3) as NameNode,
-            new ListNode('*')
-          );
+          yyval = this.yystack.valueAt(0);
         }
         break;
       case 28:
         if (yyn == 28) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 29:
+        if (yyn == 29) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 30:
+        if (yyn == 30) {
+          yyval = this.yystack.valueAt(0);
+        }
+        break;
+      case 31:
+        if (yyn == 31) {
           yyval = new FunctionCallNode(
             this.yystack.valueAt(1) as NameNode,
             this.yystack.valueAt(0) as ListNode
           );
         }
         break;
-      case 29:
-        if (yyn == 29) {
+      case 32:
+        if (yyn == 32) {
           yyval = new ListNode();
         }
         break;
-      case 30:
-        if (yyn == 30) {
+      case 33:
+        if (yyn == 33) {
           yyval = this.yystack.valueAt(1);
         }
         break;
-      case 31:
-        if (yyn == 31) {
+      case 34:
+        if (yyn == 34) {
           yyval = new ListNode(this.yystack.valueAt(0));
         }
         break;
-      case 32:
-        if (yyn == 32) {
+      case 35:
+        if (yyn == 35) {
           yyval = this.yystack.valueAt(2);
           (yyval as ListNode).push(this.yystack.valueAt(0));
         }
@@ -688,20 +708,23 @@ class SymbolKind {
   static S_GE: SymbolKind = new SymbolKind(15);
   static S_AND: SymbolKind = new SymbolKind(16);
   static S_OR: SymbolKind = new SymbolKind(17);
-  static S_LOGICAL: SymbolKind = new SymbolKind(18);
-  static S_NUMBER: SymbolKind = new SymbolKind(19);
-  static S_STRING: SymbolKind = new SymbolKind(20);
-  static S_NAME: SymbolKind = new SymbolKind(21);
-  static S_AS: SymbolKind = new SymbolKind(22);
-  static S_NEG: SymbolKind = new SymbolKind(23);
-  static S_YYACCEPT: SymbolKind = new SymbolKind(24);
-  static S_start: SymbolKind = new SymbolKind(25);
-  static S_statement: SymbolKind = new SymbolKind(26);
-  static S_expression: SymbolKind = new SymbolKind(27);
-  static S_constant: SymbolKind = new SymbolKind(28);
-  static S_function_call: SymbolKind = new SymbolKind(29);
-  static S_argument_list: SymbolKind = new SymbolKind(30);
-  static S_non_empty_argument_list: SymbolKind = new SymbolKind(31);
+  static S_IS: SymbolKind = new SymbolKind(18);
+  static S_NOT: SymbolKind = new SymbolKind(19);
+  static S_LOGICAL: SymbolKind = new SymbolKind(20);
+  static S_NUMBER: SymbolKind = new SymbolKind(21);
+  static S_STRING: SymbolKind = new SymbolKind(22);
+  static S_NAME: SymbolKind = new SymbolKind(23);
+  static S_NULL: SymbolKind = new SymbolKind(24);
+  static S_AS: SymbolKind = new SymbolKind(25);
+  static S_NEG: SymbolKind = new SymbolKind(26);
+  static S_YYACCEPT: SymbolKind = new SymbolKind(27);
+  static S_start: SymbolKind = new SymbolKind(28);
+  static S_statement: SymbolKind = new SymbolKind(29);
+  static S_expression: SymbolKind = new SymbolKind(30);
+  static S_constant: SymbolKind = new SymbolKind(31);
+  static S_function_call: SymbolKind = new SymbolKind(32);
+  static S_argument_list: SymbolKind = new SymbolKind(33);
+  static S_non_empty_argument_list: SymbolKind = new SymbolKind(34);
   yycode_: int;
   constructor(n: int) {
     this.yycode_ = n;
@@ -725,10 +748,13 @@ class SymbolKind {
     SymbolKind.S_GE,
     SymbolKind.S_AND,
     SymbolKind.S_OR,
+    SymbolKind.S_IS,
+    SymbolKind.S_NOT,
     SymbolKind.S_LOGICAL,
     SymbolKind.S_NUMBER,
     SymbolKind.S_STRING,
     SymbolKind.S_NAME,
+    SymbolKind.S_NULL,
     SymbolKind.S_AS,
     SymbolKind.S_NEG,
     SymbolKind.S_YYACCEPT,
@@ -767,10 +793,13 @@ class SymbolKind {
       '>=',
       'and',
       'or',
+      'is',
+      'not',
       i18n('logical constant'),
       i18n('numeric constant'),
       i18n('string constant'),
       i18n('name'),
+      i18n('null'),
       'AS',
       'NEG',
       '$accept',
@@ -806,12 +835,15 @@ export const NE: int = 269;
 export const GE: int = 270;
 export const AND: int = 271;
 export const OR: int = 272;
-export const LOGICAL: int = 273;
-export const NUMBER: int = 274;
-export const STRING: int = 275;
-export const NAME: int = 276;
-export const AS: int = 277;
-export const NEG: int = 278;
+export const IS: int = 273;
+export const NOT: int = 274;
+export const LOGICAL: int = 275;
+export const NUMBER: int = 276;
+export const STRING: int = 277;
+export const NAME: int = 278;
+export const NULL: int = 279;
+export const AS: int = 280;
+export const NEG: int = 281;
 export const EOF: int = YYEOF;
 export interface Lexer {
   yyerror(loc: Location, msg: String): void;

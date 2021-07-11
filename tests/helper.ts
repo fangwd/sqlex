@@ -178,7 +178,7 @@ function createMySQLDatabase(name: string, data = true): Promise<any> {
         resolve(results);
       });
     });
-  }, lines);
+  }, lines).then(results => { db.end(); return results });
 }
 
 function dropMySQLDatabase(name: string): Promise<void> {
@@ -194,6 +194,7 @@ function dropMySQLDatabase(name: string): Promise<void> {
   return new Promise(resolve => {
     db.query(`drop database if exists ${database}`, err => {
       if (err) throw err;
+      db.end();
       resolve();
     });
   });

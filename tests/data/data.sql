@@ -58,3 +58,6 @@ insert into order_item (order_id, product_id, quantity) values
 insert into order_shipping(order_id, status) values
   (1, 1),
   (2, 2);
+insert into service_log(id, product_code, customer_email) values
+  (1, 'sku001', 'bob@example.com'),
+  (2, 'sku002', 'alice@example.com');

@@ -9,6 +9,6 @@ describe('rewrite', () => {
       func: (name) => name,
       text: (text) => `'${text}'`,
     });
-    expect(res).toBe(`length("order.user.email"+'foo')`);
+    expect(res).toBe(`length("order.user.email" + 'foo')`);
   });
 });

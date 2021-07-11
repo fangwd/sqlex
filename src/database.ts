@@ -190,6 +190,13 @@ export class Database {
       return result;
     }, {});
   }
+
+  async query(sql:string) {
+    const connection = await this.pool.getConnection();
+    const result = await connection.query(sql);
+    connection.release();
+    return result;
+  }
 }
 
 export type OrderBy = string | string[];

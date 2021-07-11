@@ -1,6 +1,6 @@
 {
   "name": "sqlex",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Sqlex - A library that makes database access easy and fun",
   "main": "./dist/index.js",
   "files": [
@@ -33,25 +33,5 @@
   "scripts": {
     "test": "jest --runInBand",
     "build": "tsc"
-  },
-  "jest": {
-    "transform": {
-      "^.+\\.tsx?$": "ts-jest"
-    },
-    "testEnvironment": "node",
-    "testRegex": "/tests/.+\\.test.ts",
-    "moduleFileExtensions": [
-      "ts",
-      "tsx",
-      "js",
-      "jsx",
-      "json",
-      "node"
-    ],
-    "collectCoverage": false,
-    "collectCoverageFrom": [
-      "src/**/*.ts"
-    ],
-    "verbose": true
   }
 }

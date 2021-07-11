@@ -161,3 +161,8 @@ create table comment(
 
 alter table user add foreign key (first_post_id) references post(id);
 
+create table service_log(
+  id integer primary key auto_increment,
+  product_code char(40),
+  customer_email varchar(60)
+);
