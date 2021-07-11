@@ -853,3 +853,55 @@ test('claim', async done => {
     done();
   });
 });
+
+describe('db.select', () => {
+  test('select(*) from table should return all rows', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const options = {
+      fields: '*',
+      from: 'product',
+      where: {
+        name_like: '%Apple',
+      },
+      orderBy: 'name',
+      offset: 1,
+      limit: 1,
+    };
+    const rows = await db.select(options);
+    expect(rows.length).toBe(1);
+    expect((rows[0].name as string).indexOf('Australian')).toBe(0);
+    db.end();
+  });
+  test('should support aggregate functions', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const options = {
+      fields: [
+        'oi.order.user.email as userEmail',
+        'product.name',
+        'count(*)',
+        'avg(product.price) as price',
+      ],
+      from: {
+        table: 'order_item oi',
+        joins: [
+          {
+            table: 'product',
+            on: `oi.product_id = product.id`,
+          },
+          {
+            table: 'service_log sl',
+            on: `sl.product_code = product.sku`,
+          },
+        ],
+      },
+      groupBy: ['oi.order.user.email', 'product.name'],
+      where: { 'product.name_like': '%Apple%' },
+    };
+    const rows = await db.select(options);
+    expect(rows.length).toBe(1);
+    expect(typeof rows[0].userEmail).toBe('string');
+    expect(typeof rows[0].price).toBe('number');
+    db.end();
+  });
+});
+

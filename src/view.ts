@@ -130,24 +130,6 @@ function parseTable(name: string) {
   return { name: ast.name, alias: ast.alias || ast.name };
 }
 
-// "t1.email", "t1.email as sender", "t1.email sender", "t1.foo + t2.bar", "t1.*"
-function parseField(expr: string) {
-  const ast = parse(expr);
-
-  const alias = ast.alias;
-
-  if (ast.kind === Kind.NAME) {
-    const name = (ast as NameNode).name;
-    const match = /^([^.]+)\.(.+)$/.exec(name);
-    if (!match) {
-      throw new Error(`Invalid field: ${expr}`);
-    }
-    return { table: match[1], field: match[2], alias };
-  }
-
-  return ast;
-}
-
 export function cloneField(field: SimpleField): SimpleField {
   if (field instanceof ForeignKeyField) {
     return new ForeignKeyField(field.model, field.column, field.config);

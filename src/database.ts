@@ -35,6 +35,7 @@ import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
 import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
 import { parse } from './parser';
+import { ViewModel, ViewOptions } from './view';
 
 export class ClosureTable {
   constructor(
@@ -197,6 +198,33 @@ export class Database {
     connection.release();
     return result;
   }
+
+  async select(options: DatabaseSelectOptions, connection?: Connection) {
+    const view = new ViewModel(
+      this,
+      typeof options.from === 'string' ? { table: options.from } : options.from
+    );
+    const builder = new QueryBuilder(view, this.pool);
+    let query = builder.select(
+      typeof options.fields === 'string' ? [options.fields] : options.fields,
+      options.where,
+      options.orderBy,
+      options.groupBy
+    );
+    if (options.limit !== undefined) {
+      query += ` limit ${+options.limit}`;
+    }
+    if (options.offset !== undefined) {
+      query += ` offset ${+options.offset}`;
+    }
+    if (!connection) {
+      connection = await this.pool.getConnection();
+      const result = connection.query(query);
+      connection.release();
+      return result;
+    }
+    return connection.query(query);
+  }
 }
 
 export type OrderBy = string | string[];
@@ -207,6 +235,11 @@ export interface SelectOptions {
   limit?: number;
   orderBy?: OrderBy;
   groupBy?: string[];
+}
+
+export interface DatabaseSelectOptions extends SelectOptions {
+  fields: string | string[],
+  from: string | ViewOptions
 }
 
 export class Table {

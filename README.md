@@ -63,6 +63,36 @@ const rows = await db.table('order').select({
 });
 ```
 
+Views and aggregate functions are supported:
+
+```js
+const rows = await db.select({
+ fields: [
+    'oi.order.user.email as userEmail',
+    'product.name',
+    'count(*)',
+    'avg(product.price) as price',
+  ],
+  from: {
+    table: 'order_item oi',
+    joins: [
+      {
+        table: 'product',
+        on: `oi.product_id = product.id`,
+      },
+      {
+        table: 'service_log sl',
+        on: `sl.product_code = product.sku`,
+      },
+    ],
+  },
+  groupBy: ['oi.order.user.email', 'product.name'],
+  where: { 'product.name_like': '%Apple%' },
+};
+expect(typeof rows[0].userEmail).toBe('string');
+expect(typeof rows[0].price).toBe('number');
+```
+
 ## Updating
 
 This example creates a new category and then renames its name:
@@ -133,7 +163,7 @@ await table.create(data);
 
 This example creates a category tree:
 
-```
+```js
   const root = await table.create({
     name: 'All',
     parent: null
