@@ -132,7 +132,10 @@ function parseTable(name: string) {
 
 export function cloneField(field: SimpleField): SimpleField {
   if (field instanceof ForeignKeyField) {
-    return new ForeignKeyField(field.model, field.column, field.config);
+    const copy = new ForeignKeyField(field.model, field.column, field.config);
+    copy.referencedField = field.referencedField;
+    copy.relatedField = field.relatedField;
+    return copy
   }
   return new SimpleField(field.model, field.column, field.config);
 }

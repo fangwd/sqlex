@@ -70,3 +70,13 @@ export function setPluralForms(data: { [key: string]: string }): void {
 export function setPluralForm(singular: string, plural: string): void {
   config.plural[singular] = plural;
 }
+
+export function pluck<T extends { [key: string]: any }>(from: T, keys: (keyof T)[]): Partial<T> {
+  const result: Partial<T> = {};
+  for (const key of keys) {
+    if (key in from) {
+      result[key] = from[key];
+    }
+  }
+  return result;
+}

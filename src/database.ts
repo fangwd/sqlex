@@ -36,6 +36,7 @@ import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
 import { parse } from './parser';
 import { ViewModel, ViewOptions } from './view';
+import { pluck } from './utils';
 
 export class ClosureTable {
   constructor(
@@ -58,10 +59,7 @@ export class Database {
       this.pool = connection;
       this.name = this.pool.name;
     } else if (connection) {
-      this.pool = createConnectionPool(
-        connection.dialect,
-        connection.connection
-      );
+      this.pool = createConnectionPool(connection.dialect, connection.connection);
       this.name = connection.connection.database || connection.connection.name;
     }
     if (schema) this.setSchema(schema);
@@ -76,9 +74,9 @@ export class Database {
 
   async buildSchema(config?: SchemaConfig): Promise<Schema> {
     if (this.schema) return Promise.resolve(this.schema);
-    return new Promise(resolve =>
-      this.pool.getConnection().then(connection =>
-        getInformationSchema(connection, this.name).then(schemaInfo => {
+    return new Promise((resolve) =>
+      this.pool.getConnection().then((connection) =>
+        getInformationSchema(connection, this.name).then((schemaInfo) => {
           const schema = new Schema(schemaInfo, config);
           this.setSchema(schema);
           connection.release();
@@ -132,12 +130,7 @@ export class Database {
           }
         }
 
-        this.table(model).closureTable = new ClosureTable(
-          table,
-          ancestor,
-          descendant,
-          depth
-        );
+        this.table(model).closureTable = new ClosureTable(table, ancestor, descendant, depth);
       }
     }
   }
@@ -167,7 +160,7 @@ export class Database {
   }
 
   flush(flushOptions?: FlushOptions) {
-    return this.pool.getConnection().then(connection =>
+    return this.pool.getConnection().then((connection) =>
       flushDatabase(connection, this, flushOptions).then(() => {
         connection.release();
         return connection;
@@ -192,18 +185,18 @@ export class Database {
     }, {});
   }
 
-  async query(sql:string) {
+  async query(sql: string) {
     const connection = await this.pool.getConnection();
     const result = await connection.query(sql);
     connection.release();
     return result;
   }
 
-  async select(options: DatabaseSelectOptions, connection?: Connection) {
-    const view = new ViewModel(
-      this,
-      typeof options.from === 'string' ? { table: options.from } : options.from
-    );
+  async select(options: DatabaseSelectOptions, connection?: Connection): Promise<Document[]> {
+    if (typeof options.from === 'string') {
+      return this.table(options.from).select(options.fields, pluck(options, SelectOptionKeys));
+    }
+    const view = new ViewModel(this, options.from);
     const builder = new QueryBuilder(view, this.pool);
     let query = builder.select(
       typeof options.fields === 'string' ? [options.fields] : options.fields,
@@ -236,6 +229,14 @@ export interface SelectOptions {
   orderBy?: OrderBy;
   groupBy?: string[];
 }
+
+export const SelectOptionKeys: (keyof SelectOptions)[] = [
+  'where',
+  'offset',
+  'limit',
+  'orderBy',
+  'groupBy',
+];
 
 export interface DatabaseSelectOptions extends SelectOptions {
   fields: string | string[],
