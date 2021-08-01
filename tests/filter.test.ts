@@ -266,3 +266,50 @@ test('group by', async () => {
   connection.release();
   db.end();
 });
+
+describe('notIn', () => {
+  test('should filter using non-key fields', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const args = {
+      name_notIn: ['ADMIN', 'STAFF'],
+    };
+    const rows = await db.table('group').select('*', { where: args });
+    expect(rows.length).toBe(1);
+    expect(rows[0].name).toBe('CUSTOMER');
+    db.end();
+  });
+  test('should filter using primary key', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const args = {
+      id_notIn: [1, 2],
+    };
+    const rows = await db.table('group').select('*', { where: args });
+    expect(rows.length).toBe(1);
+    expect(rows[0].name).toBe('CUSTOMER');
+    db.end();
+  });
+});
+
+describe('not null', () => {
+  test('should work for non-foreign key fields', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const args = {
+      content_ne: null
+    };
+    const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
+    expect(rows.length).toBe(2);
+    expect(rows[0].content).toBe('comment 1');
+    db.end();
+  });
+
+  test('should work for foreign keys', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const args = {
+      parent_ne: null,
+    };
+    const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
+    expect(rows.length).toBe(2);
+    expect(rows[0].content).toBe('comment 2');
+    db.end();
+  });
+});

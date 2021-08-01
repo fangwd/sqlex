@@ -151,7 +151,7 @@ export class QueryBuilder {
       if (field instanceof ForeignKeyField) {
         const query = value as Filter;
         if (query === null || typeof query !== 'object') {
-          exprs.push(this.expr(field, '=', value));
+          exprs.push(this.expr(field, operator || '=', value));
         } else if (Array.isArray(query)) {
           const values = [];
           const filter = [];
@@ -254,17 +254,19 @@ export class QueryBuilder {
         ? this.escapeId(field.name)
         : this.encodeField(field.column.name);
     if (Array.isArray(value)) {
-      if (!operator || operator === 'in') {
+      if (!operator || operator === 'in' || operator === 'notIn') {
         const values = value
           .filter((value) => value !== null)
           .map((value) => this.escape(field, value));
+        const not = operator === 'notIn' ? 'not ' : '';
+        const or = operator === 'notIn' ? 'and' : 'or';
         if (values.length < value.length) {
           return values.length === 0
-            ? `${lhs} is null`
-            : `(${lhs} is null or ${lhs} in (${values.join(', ')}))`;
+            ? `${lhs} is ${not}null`
+            : `(${lhs} is ${not}null ${or} ${lhs} ${not}in (${values.join(', ')}))`;
         } else {
           if (values.length === 0) return 'false';
-          return `${lhs} in (${values.join(', ')})`;
+          return `${lhs} ${not}in (${values.join(', ')})`;
         }
       } else {
         throw Error(`Bad value: ${JSON.stringify(value)}`);
@@ -273,8 +275,9 @@ export class QueryBuilder {
 
     operator = operator || '=';
 
-    if (operator === '=' && value === null) {
-      return `${lhs} is null`;
+    if ((operator === '=' || operator === '<>') && value === null) {
+      const not = operator === '<>' ? 'not ' : '';
+      return `${lhs} is ${not}null`;
     }
 
     if (operator === 'null') {
@@ -635,6 +638,7 @@ export const GE = 'ge';
 export const GT = 'gt';
 export const NE = 'ne';
 export const IN = 'in';
+export const NOT_IN = 'notIn';
 export const LIKE = 'like';
 export const NULL = 'null';
 export const SOME = 'some';
@@ -647,6 +651,7 @@ const OPERATOR_MAP = {
   [GT]: '>',
   [NE]: '<>',
   [IN]: 'in',
+  [NOT_IN]: 'notIn',
   [LIKE]: 'like',
 };
 

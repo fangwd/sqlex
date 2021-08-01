@@ -61,3 +61,10 @@ insert into order_shipping(order_id, status) values
 insert into service_log(id, product_code, customer_email) values
   (1, 'sku001', 'bob@example.com'),
   (2, 'sku002', 'alice@example.com');
+insert into post(id,user_id,title) values
+  (1, 1, 'post 1');
+insert into comment(id, post_id, parent_id, content) values
+  (1, 1, null, 'comment 1');
+insert into comment(id, post_id, parent_id, content) values
+  (2, 1, 1, 'comment 2'),
+  (3, 1, 1, null);
