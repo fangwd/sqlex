@@ -9,7 +9,7 @@ import {
 import Lexer from '../src/parser/lexer';
 
 test('symbols', () => {
-  const text = '( ) * + , - / < = > <= <> >=';
+  const text = '( ) * + , - / < = > <= <> >= ::';
   const lexer = new Lexer(text);
   expect(lexer.lex()).toBe(Token.LPAREN);
   expect(lexer.lex()).toBe(Token.RPAREN);
@@ -24,6 +24,8 @@ test('symbols', () => {
   expect(lexer.lex()).toBe(Token.LE);
   expect(lexer.lex()).toBe(Token.NE);
   expect(lexer.lex()).toBe(Token.GE);
+  expect(lexer.lex()).toBe(Token.PSQL_CAST);
+  expect(lexer.yytext()).toBe('::');
   expect(lexer.lex()).toBe(Token.YYEOF);
 });
 

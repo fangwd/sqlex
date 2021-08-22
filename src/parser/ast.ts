@@ -1,3 +1,6 @@
+import { isReserved } from './keywords';
+import * as Token from './parser';
+
 export type InfixOperator =
   | '+'
   | '-'
@@ -23,6 +26,7 @@ export enum Kind {
   FCALL,
   LIST,
   STAR, // count(*)
+  FLAT,
 }
 
 export class Node {
@@ -139,6 +143,15 @@ export class ListNode extends Node {
   }
 }
 
+export class FlatNode extends Node {
+  tokens: Array<{ type: number; text: string }>;
+
+  constructor() {
+    super(Kind.FLAT);
+    this.tokens = [];
+  }
+}
+
 export class Statement {
   node?: Node;
 }
@@ -202,6 +215,22 @@ export function rewrite(ast: Node, options: RewriteOptions) {
     case Kind.VALUE:
       result = encodeValue(ast as ValueNode, options.text);
       break;
+    case Kind.FLAT:
+      return rewriteFlat(ast as FlatNode, options);
   }
   return ast.brackets ? `(${result})` : result;
+}
+
+export function rewriteFlat(ast: FlatNode, options: { name: Encoder }) {
+  const literals = [];
+  for (const token of ast.tokens) {
+    switch (token.type) {
+      case Token.NAME:
+        literals.push(options.name(token.text));
+        break;
+      default:
+        literals.push(token.text);
+    }
+  }
+  return literals.join(' ');
 }

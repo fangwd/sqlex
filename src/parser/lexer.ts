@@ -62,7 +62,6 @@ export default class Lexer implements Token.Lexer {
             case '$':
             case '%':
             case '&':
-            case ':':
             case ';':
             case '?':
             case '@':
@@ -138,54 +137,58 @@ export default class Lexer implements Token.Lexer {
               state = 24;
               continue;
             }
-            case '<': {
+            case ':': {
               state = 27;
               continue;
             }
+            case '<': {
+              state = 28;
+              continue;
+            }
             case '=': {
-              state = 29;
+              state = 30;
               continue;
             }
             case '>': {
-              state = 31;
+              state = 32;
               continue;
             }
             case 'A':
             case 'a': {
-              state = 33;
+              state = 34;
               continue;
             }
             case 'F':
             case 'f': {
-              state = 37;
+              state = 38;
               continue;
             }
             case 'I':
             case 'i': {
-              state = 38;
+              state = 39;
               continue;
             }
             case 'N':
             case 'n': {
-              state = 39;
+              state = 40;
               continue;
             }
             case 'O':
             case 'o': {
-              state = 40;
+              state = 41;
               continue;
             }
             case 'T':
             case 't': {
-              state = 41;
-              continue;
-            }
-            case '`': {
               state = 42;
               continue;
             }
+            case '`': {
+              state = 43;
+              continue;
+            }
             default: {
-              state = 35;
+              state = 36;
               continue;
             }
           }
@@ -234,7 +237,7 @@ export default class Lexer implements Token.Lexer {
             continue;
           }
           {
-            state = 43;
+            state = 44;
             continue;
           }
         case 8:
@@ -245,7 +248,7 @@ export default class Lexer implements Token.Lexer {
             continue;
           }
           {
-            state = 47;
+            state = 48;
             continue;
           }
         case 9:
@@ -285,7 +288,7 @@ export default class Lexer implements Token.Lexer {
             continue;
           }
           if (yych <= '9') {
-            state = 50;
+            state = 51;
             continue;
           }
           {
@@ -301,7 +304,7 @@ export default class Lexer implements Token.Lexer {
           yyaccept = 1;
           yych = this.charAt((marker = ++this.cursor));
           if (yych == '.') {
-            state = 52;
+            state = 53;
             continue;
           }
           if (yych <= '/') {
@@ -317,292 +320,302 @@ export default class Lexer implements Token.Lexer {
         }
         case 27:
           yych = this.charAt(++this.cursor);
+          if (yych == ':') {
+            state = 54;
+            continue;
+          }
+          {
+            state = 3;
+            continue;
+          }
+        case 28:
+          yych = this.charAt(++this.cursor);
           if (yych <= '<') {
-            state = 28;
+            state = 29;
             continue;
           }
           if (yych <= '=') {
-            state = 53;
+            state = 56;
             continue;
           }
           if (yych <= '>') {
-            state = 55;
+            state = 58;
             continue;
           }
-        case 28: {
+        case 29: {
           return Token.LT;
         }
-        case 29:
+        case 30:
           ++this.cursor;
           {
             return Token.EQ;
           }
-        case 31:
+        case 32:
           yych = this.charAt(++this.cursor);
           if (yych == '=') {
-            state = 57;
+            state = 60;
             continue;
           }
           {
             return Token.GT;
           }
-        case 33:
+        case 34:
           yych = this.charAt(++this.cursor);
           if (yych <= 'R') {
             if (yych <= '*') {
               if (yych <= ')') {
-                state = 60;
+                state = 63;
                 continue;
               }
             } else {
               if (yych == 'N') {
-                state = 61;
+                state = 64;
                 continue;
               }
               {
-                state = 60;
+                state = 63;
                 continue;
               }
             }
           } else {
             if (yych <= 'n') {
               if (yych <= 'S') {
-                state = 62;
+                state = 65;
                 continue;
               }
               if (yych <= 'm') {
-                state = 60;
+                state = 63;
                 continue;
               }
               {
-                state = 61;
+                state = 64;
                 continue;
               }
             } else {
               if (yych == 's') {
-                state = 62;
+                state = 65;
                 continue;
               }
               {
-                state = 60;
+                state = 63;
                 continue;
               }
             }
           }
-        case 34: {
+        case 35: {
           return this._name();
         }
-        case 35:
+        case 36:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych <= '/') {
-                state = 34;
+                state = 35;
                 continue;
               }
               {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych <= '@') {
-                state = 34;
+                state = 35;
                 continue;
               }
               {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych <= '^') {
-                state = 34;
+                state = 35;
                 continue;
               }
               {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych <= '`') {
-                state = 34;
+                state = 35;
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych <= String.fromCharCode(0x007f)) {
-                state = 34;
-                continue;
-              }
-              {
                 state = 35;
                 continue;
               }
-            }
-          }
-        case 37:
-          yych = this.charAt(++this.cursor);
-          if (yych <= '@') {
-            if (yych == '*') {
-              state = 34;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
-          } else {
-            if (yych <= 'A') {
-              state = 64;
-              continue;
-            }
-            if (yych == 'a') {
-              state = 64;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
+              {
+                state = 36;
+                continue;
+              }
             }
           }
         case 38:
           yych = this.charAt(++this.cursor);
-          if (yych <= 'R') {
+          if (yych <= '@') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
-            if (yych <= 'S') {
-              state = 65;
+            if (yych <= 'A') {
+              state = 67;
               continue;
             }
-            if (yych == 's') {
-              state = 65;
+            if (yych == 'a') {
+              state = 67;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           }
         case 39:
           yych = this.charAt(++this.cursor);
+          if (yych <= 'R') {
+            if (yych == '*') {
+              state = 35;
+              continue;
+            }
+            {
+              state = 63;
+              continue;
+            }
+          } else {
+            if (yych <= 'S') {
+              state = 68;
+              continue;
+            }
+            if (yych == 's') {
+              state = 68;
+              continue;
+            }
+            {
+              state = 63;
+              continue;
+            }
+          }
+        case 40:
+          yych = this.charAt(++this.cursor);
           if (yych <= 'T') {
             if (yych <= '*') {
               if (yych <= ')') {
-                state = 60;
+                state = 63;
                 continue;
               }
               {
-                state = 34;
+                state = 35;
                 continue;
               }
             } else {
               if (yych == 'O') {
-                state = 67;
+                state = 70;
                 continue;
               }
               {
-                state = 60;
+                state = 63;
                 continue;
               }
             }
           } else {
             if (yych <= 'o') {
               if (yych <= 'U') {
-                state = 68;
+                state = 71;
                 continue;
               }
               if (yych <= 'n') {
-                state = 60;
+                state = 63;
                 continue;
               }
               {
-                state = 67;
+                state = 70;
                 continue;
               }
             } else {
               if (yych == 'u') {
-                state = 68;
+                state = 71;
                 continue;
               }
               {
-                state = 60;
+                state = 63;
                 continue;
               }
-            }
-          }
-        case 40:
-          yych = this.charAt(++this.cursor);
-          if (yych <= 'Q') {
-            if (yych == '*') {
-              state = 34;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
-          } else {
-            if (yych <= 'R') {
-              state = 69;
-              continue;
-            }
-            if (yych == 'r') {
-              state = 69;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
             }
           }
         case 41:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Q') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
             if (yych <= 'R') {
-              state = 71;
+              state = 72;
               continue;
             }
             if (yych == 'r') {
-              state = 71;
+              state = 72;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           }
         case 42:
+          yych = this.charAt(++this.cursor);
+          if (yych <= 'Q') {
+            if (yych == '*') {
+              state = 35;
+              continue;
+            }
+            {
+              state = 63;
+              continue;
+            }
+          } else {
+            if (yych <= 'R') {
+              state = 74;
+              continue;
+            }
+            if (yych == 'r') {
+              state = 74;
+              continue;
+            }
+            {
+              state = 63;
+              continue;
+            }
+          }
+        case 43:
           yyaccept = 0;
           yych = this.charAt((marker = ++this.cursor));
           if (yych <= String.fromCharCode(0x0000)) {
@@ -614,24 +627,24 @@ export default class Lexer implements Token.Lexer {
             continue;
           }
           {
-            state = 72;
+            state = 75;
             continue;
           }
-        case 43:
+        case 44:
           yych = this.charAt(++this.cursor);
           if (yych <= String.fromCharCode(0x0000)) {
-            state = 45;
+            state = 46;
             continue;
           }
           if (yych == '"') {
-            state = 74;
+            state = 77;
             continue;
           }
           {
-            state = 43;
+            state = 44;
             continue;
           }
-        case 45:
+        case 46:
           this.cursor = marker;
           if (yyaccept <= 1) {
             if (yyaccept == 0) {
@@ -647,31 +660,31 @@ export default class Lexer implements Token.Lexer {
             }
           } else {
             {
-              state = 49;
+              state = 50;
               continue;
             }
           }
-        case 46:
-          yych = this.charAt(++this.cursor);
         case 47:
+          yych = this.charAt(++this.cursor);
+        case 48:
           if (yych <= String.fromCharCode(0x0000)) {
-            state = 45;
+            state = 46;
             continue;
           }
           if (yych != "'") {
-            state = 46;
+            state = 47;
             continue;
           }
           yyaccept = 2;
           yych = this.charAt((marker = ++this.cursor));
           if (yych == "'") {
-            state = 46;
+            state = 47;
             continue;
           }
-        case 49: {
+        case 50: {
           return this._string();
         }
-        case 50:
+        case 51:
           yyaccept = 1;
           yych = this.charAt((marker = ++this.cursor));
           if (yych <= 'D') {
@@ -680,7 +693,7 @@ export default class Lexer implements Token.Lexer {
               continue;
             }
             if (yych <= '9') {
-              state = 50;
+              state = 51;
               continue;
             }
             {
@@ -689,11 +702,11 @@ export default class Lexer implements Token.Lexer {
             }
           } else {
             if (yych <= 'E') {
-              state = 76;
+              state = 79;
               continue;
             }
             if (yych == 'e') {
-              state = 76;
+              state = 79;
               continue;
             }
             {
@@ -701,69 +714,74 @@ export default class Lexer implements Token.Lexer {
               continue;
             }
           }
-        case 52:
+        case 53:
           yych = this.charAt(++this.cursor);
           if (yych <= '/') {
-            state = 45;
+            state = 46;
             continue;
           }
           if (yych <= '9') {
-            state = 50;
+            state = 51;
             continue;
           }
           {
-            state = 45;
+            state = 46;
             continue;
           }
-        case 53:
+        case 54:
+          ++this.cursor;
+          {
+            return Token.PSQL_CAST;
+          }
+        case 56:
           ++this.cursor;
           {
             return Token.LE;
           }
-        case 55:
+        case 58:
           ++this.cursor;
           {
             return Token.NE;
           }
-        case 57:
+        case 60:
           ++this.cursor;
           {
             return Token.GE;
           }
-        case 59:
+        case 62:
           yych = this.charAt(++this.cursor);
-        case 60:
+        case 63:
           if (yych <= '@') {
             if (yych <= '.') {
               if (yych == '*') {
-                state = 77;
+                state = 80;
                 continue;
               }
               if (yych <= '-') {
-                state = 34;
+                state = 35;
                 continue;
               }
               {
-                state = 59;
+                state = 62;
                 continue;
               }
             } else {
               if (yych <= '9') {
                 if (yych <= '/') {
-                  state = 34;
+                  state = 35;
                   continue;
                 }
                 {
-                  state = 35;
+                  state = 36;
                   continue;
                 }
               } else {
                 if (yych == '?') {
-                  state = 35;
+                  state = 36;
                   continue;
                 }
                 {
-                  state = 34;
+                  state = 35;
                   continue;
                 }
               }
@@ -771,140 +789,65 @@ export default class Lexer implements Token.Lexer {
           } else {
             if (yych <= '^') {
               if (yych == '[') {
-                state = 34;
-                continue;
-              }
-              if (yych <= '\\') {
                 state = 35;
                 continue;
               }
+              if (yych <= '\\') {
+                state = 36;
+                continue;
+              }
               {
-                state = 34;
+                state = 35;
                 continue;
               }
             } else {
               if (yych <= '`') {
                 if (yych <= '_') {
-                  state = 35;
+                  state = 36;
                   continue;
                 }
                 {
-                  state = 34;
+                  state = 35;
                   continue;
                 }
               } else {
                 if (yych <= 'z') {
-                  state = 35;
+                  state = 36;
                   continue;
                 }
                 if (yych <= String.fromCharCode(0x007f)) {
-                  state = 34;
+                  state = 35;
                   continue;
                 }
                 {
-                  state = 35;
+                  state = 36;
                   continue;
                 }
               }
             }
           }
-        case 61:
+        case 64:
           yych = this.charAt(++this.cursor);
           if (yych <= 'C') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
             if (yych <= 'D') {
-              state = 79;
+              state = 82;
               continue;
             }
             if (yych == 'd') {
-              state = 79;
+              state = 82;
               continue;
             }
             {
-              state = 60;
-              continue;
-            }
-          }
-        case 62:
-          yych = this.charAt(++this.cursor);
-          if (yych <= 'Z') {
-            if (yych <= '9') {
-              if (yych == '.') {
-                state = 59;
-                continue;
-              }
-              if (yych >= '0') {
-                state = 35;
-                continue;
-              }
-            } else {
-              if (yych == '?') {
-                state = 35;
-                continue;
-              }
-              if (yych >= 'A') {
-                state = 35;
-                continue;
-              }
-            }
-          } else {
-            if (yych <= '_') {
-              if (yych == '\\') {
-                state = 35;
-                continue;
-              }
-              if (yych >= '_') {
-                state = 35;
-                continue;
-              }
-            } else {
-              if (yych <= '`') {
-                state = 63;
-                continue;
-              }
-              if (yych <= 'z') {
-                state = 35;
-                continue;
-              }
-              if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
-                continue;
-              }
-            }
-          }
-        case 63: {
-          return Token.AS;
-        }
-        case 64:
-          yych = this.charAt(++this.cursor);
-          if (yych <= 'K') {
-            if (yych == '*') {
-              state = 34;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
-          } else {
-            if (yych <= 'L') {
-              state = 81;
-              continue;
-            }
-            if (yych == 'l') {
-              state = 81;
-              continue;
-            }
-            {
-              state = 60;
+              state = 63;
               continue;
             }
           }
@@ -913,31 +856,31 @@ export default class Lexer implements Token.Lexer {
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych >= '0') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= 'A') {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= '_') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
@@ -946,52 +889,27 @@ export default class Lexer implements Token.Lexer {
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           }
         case 66: {
-          return Token.IS;
+          return Token.AS;
         }
         case 67:
           yych = this.charAt(++this.cursor);
-          if (yych <= 'S') {
-            if (yych == '*') {
-              state = 34;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
-          } else {
-            if (yych <= 'T') {
-              state = 82;
-              continue;
-            }
-            if (yych == 't') {
-              state = 82;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
-          }
-        case 68:
-          yych = this.charAt(++this.cursor);
           if (yych <= 'K') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
@@ -1004,132 +922,198 @@ export default class Lexer implements Token.Lexer {
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           }
-        case 69:
+        case 68:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych >= '0') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= 'A') {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= '_') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych <= '`') {
-                state = 70;
+                state = 69;
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           }
-        case 70: {
-          return Token.OR;
+        case 69: {
+          return Token.IS;
         }
-        case 71:
+        case 70:
           yych = this.charAt(++this.cursor);
-          if (yych <= 'T') {
+          if (yych <= 'S') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
-            if (yych <= 'U') {
+            if (yych <= 'T') {
               state = 85;
               continue;
             }
-            if (yych == 'u') {
+            if (yych == 't') {
               state = 85;
               continue;
             }
             {
-              state = 60;
+              state = 63;
+              continue;
+            }
+          }
+        case 71:
+          yych = this.charAt(++this.cursor);
+          if (yych <= 'K') {
+            if (yych == '*') {
+              state = 35;
+              continue;
+            }
+            {
+              state = 63;
+              continue;
+            }
+          } else {
+            if (yych <= 'L') {
+              state = 87;
+              continue;
+            }
+            if (yych == 'l') {
+              state = 87;
+              continue;
+            }
+            {
+              state = 63;
               continue;
             }
           }
         case 72:
           yych = this.charAt(++this.cursor);
-          if (yych <= String.fromCharCode(0x0000)) {
-            state = 45;
-            continue;
+          if (yych <= 'Z') {
+            if (yych <= '9') {
+              if (yych == '.') {
+                state = 62;
+                continue;
+              }
+              if (yych >= '0') {
+                state = 36;
+                continue;
+              }
+            } else {
+              if (yych == '?') {
+                state = 36;
+                continue;
+              }
+              if (yych >= 'A') {
+                state = 36;
+                continue;
+              }
+            }
+          } else {
+            if (yych <= '_') {
+              if (yych == '\\') {
+                state = 36;
+                continue;
+              }
+              if (yych >= '_') {
+                state = 36;
+                continue;
+              }
+            } else {
+              if (yych <= '`') {
+                state = 73;
+                continue;
+              }
+              if (yych <= 'z') {
+                state = 36;
+                continue;
+              }
+              if (yych >= String.fromCharCode(0x0080)) {
+                state = 36;
+                continue;
+              }
+            }
           }
-          if (yych == '`') {
-            state = 86;
-            continue;
-          }
-          {
-            state = 72;
-            continue;
-          }
+        case 73: {
+          return Token.OR;
+        }
         case 74:
-          ++this.cursor;
-          {
-            return this._name();
-          }
-        case 76:
           yych = this.charAt(++this.cursor);
-          if (yych <= ',') {
-            if (yych == '+') {
-              state = 88;
+          if (yych <= 'T') {
+            if (yych == '*') {
+              state = 35;
               continue;
             }
             {
-              state = 45;
+              state = 63;
               continue;
             }
           } else {
-            if (yych <= '-') {
+            if (yych <= 'U') {
               state = 88;
               continue;
             }
-            if (yych <= '/') {
-              state = 45;
-              continue;
-            }
-            if (yych <= '9') {
-              state = 89;
+            if (yych == 'u') {
+              state = 88;
               continue;
             }
             {
-              state = 45;
+              state = 63;
               continue;
             }
+          }
+        case 75:
+          yych = this.charAt(++this.cursor);
+          if (yych <= String.fromCharCode(0x0000)) {
+            state = 46;
+            continue;
+          }
+          if (yych == '`') {
+            state = 89;
+            continue;
+          }
+          {
+            state = 75;
+            continue;
           }
         case 77:
           ++this.cursor;
@@ -1138,109 +1122,68 @@ export default class Lexer implements Token.Lexer {
           }
         case 79:
           yych = this.charAt(++this.cursor);
-          if (yych <= 'Z') {
-            if (yych <= '9') {
-              if (yych == '.') {
-                state = 59;
-                continue;
-              }
-              if (yych >= '0') {
-                state = 35;
-                continue;
-              }
-            } else {
-              if (yych == '?') {
-                state = 35;
-                continue;
-              }
-              if (yych >= 'A') {
-                state = 35;
-                continue;
-              }
+          if (yych <= ',') {
+            if (yych == '+') {
+              state = 91;
+              continue;
+            }
+            {
+              state = 46;
+              continue;
             }
           } else {
-            if (yych <= '_') {
-              if (yych == '\\') {
-                state = 35;
-                continue;
-              }
-              if (yych >= '_') {
-                state = 35;
-                continue;
-              }
-            } else {
-              if (yych <= '`') {
-                state = 80;
-                continue;
-              }
-              if (yych <= 'z') {
-                state = 35;
-                continue;
-              }
-              if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
-                continue;
-              }
+            if (yych <= '-') {
+              state = 91;
+              continue;
+            }
+            if (yych <= '/') {
+              state = 46;
+              continue;
+            }
+            if (yych <= '9') {
+              state = 92;
+              continue;
+            }
+            {
+              state = 46;
+              continue;
             }
           }
-        case 80: {
-          return Token.AND;
-        }
-        case 81:
-          yych = this.charAt(++this.cursor);
-          if (yych <= 'R') {
-            if (yych == '*') {
-              state = 34;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
-          } else {
-            if (yych <= 'S') {
-              state = 91;
-              continue;
-            }
-            if (yych == 's') {
-              state = 91;
-              continue;
-            }
-            {
-              state = 60;
-              continue;
-            }
+        case 80:
+          ++this.cursor;
+          {
+            return this._name();
           }
         case 82:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych >= '0') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= 'A') {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= '_') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
@@ -1249,270 +1192,345 @@ export default class Lexer implements Token.Lexer {
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           }
         case 83: {
-          return Token.NOT;
+          return Token.AND;
         }
         case 84:
           yych = this.charAt(++this.cursor);
-          if (yych <= 'K') {
+          if (yych <= 'R') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
-            if (yych <= 'L') {
-              state = 92;
+            if (yych <= 'S') {
+              state = 94;
               continue;
             }
-            if (yych == 'l') {
-              state = 92;
+            if (yych == 's') {
+              state = 94;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           }
         case 85:
           yych = this.charAt(++this.cursor);
-          if (yych <= 'D') {
+          if (yych <= 'Z') {
+            if (yych <= '9') {
+              if (yych == '.') {
+                state = 62;
+                continue;
+              }
+              if (yych >= '0') {
+                state = 36;
+                continue;
+              }
+            } else {
+              if (yych == '?') {
+                state = 36;
+                continue;
+              }
+              if (yych >= 'A') {
+                state = 36;
+                continue;
+              }
+            }
+          } else {
+            if (yych <= '_') {
+              if (yych == '\\') {
+                state = 36;
+                continue;
+              }
+              if (yych >= '_') {
+                state = 36;
+                continue;
+              }
+            } else {
+              if (yych <= '`') {
+                state = 86;
+                continue;
+              }
+              if (yych <= 'z') {
+                state = 36;
+                continue;
+              }
+              if (yych >= String.fromCharCode(0x0080)) {
+                state = 36;
+                continue;
+              }
+            }
+          }
+        case 86: {
+          return Token.NOT;
+        }
+        case 87:
+          yych = this.charAt(++this.cursor);
+          if (yych <= 'K') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
+              continue;
+            }
+          } else {
+            if (yych <= 'L') {
+              state = 95;
+              continue;
+            }
+            if (yych == 'l') {
+              state = 95;
+              continue;
+            }
+            {
+              state = 63;
+              continue;
+            }
+          }
+        case 88:
+          yych = this.charAt(++this.cursor);
+          if (yych <= 'D') {
+            if (yych == '*') {
+              state = 35;
+              continue;
+            }
+            {
+              state = 63;
               continue;
             }
           } else {
             if (yych <= 'E') {
-              state = 94;
+              state = 97;
               continue;
             }
             if (yych == 'e') {
-              state = 94;
+              state = 97;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           }
-        case 86:
+        case 89:
           ++this.cursor;
           {
             return this._name();
           }
-        case 88:
+        case 91:
           yych = this.charAt(++this.cursor);
           if (yych <= '/') {
-            state = 45;
+            state = 46;
             continue;
           }
           if (yych >= ':') {
-            state = 45;
+            state = 46;
             continue;
           }
-        case 89:
+        case 92:
           yych = this.charAt(++this.cursor);
           if (yych <= '/') {
             state = 26;
             continue;
           }
           if (yych <= '9') {
-            state = 89;
+            state = 92;
             continue;
           }
           {
             state = 26;
             continue;
           }
-        case 91:
+        case 94:
           yych = this.charAt(++this.cursor);
           if (yych <= 'D') {
             if (yych == '*') {
-              state = 34;
+              state = 35;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           } else {
             if (yych <= 'E') {
-              state = 96;
+              state = 99;
               continue;
             }
             if (yych == 'e') {
-              state = 96;
+              state = 99;
               continue;
             }
             {
-              state = 60;
+              state = 63;
               continue;
             }
           }
-        case 92:
+        case 95:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych >= '0') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= 'A') {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= '_') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych <= '`') {
-                state = 93;
+                state = 96;
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           }
-        case 93: {
+        case 96: {
           return this._null();
         }
-        case 94:
+        case 97:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych >= '0') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= 'A') {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= '_') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych <= '`') {
-                state = 95;
+                state = 98;
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           }
-        case 95: {
+        case 98: {
           return this._bool(true);
         }
-        case 96:
+        case 99:
           yych = this.charAt(++this.cursor);
           if (yych <= 'Z') {
             if (yych <= '9') {
               if (yych == '.') {
-                state = 59;
+                state = 62;
                 continue;
               }
               if (yych >= '0') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych == '?') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= 'A') {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           } else {
             if (yych <= '_') {
               if (yych == '\\') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= '_') {
-                state = 35;
+                state = 36;
                 continue;
               }
             } else {
               if (yych <= '`') {
-                state = 97;
+                state = 100;
                 continue;
               }
               if (yych <= 'z') {
-                state = 35;
+                state = 36;
                 continue;
               }
               if (yych >= String.fromCharCode(0x0080)) {
-                state = 35;
+                state = 36;
                 continue;
               }
             }
           }
-        case 97: {
+        case 100: {
           return this._bool(false);
         }
       }

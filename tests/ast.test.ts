@@ -1,5 +1,5 @@
-import { rewrite } from '../src/parser/ast';
-import { parse } from '../src/parser/index';
+import { rewrite, rewriteFlat } from '../src/parser/ast';
+import { parse, parseFlat } from '../src/parser/index';
 
 describe('rewrite', () => {
   test('expr', () => {
@@ -11,4 +11,14 @@ describe('rewrite', () => {
     });
     expect(res).toBe(`length("order.user.email" + 'foo')`);
   });
+  test('flat', () => {
+    const sql = `EXTRACT (day FROM TIMESTAMP '2001-02-16 20:38:40') AS oneday`;
+    const ast = parseFlat(sql, 'postgres');
+    const isFieldName = (name:string) => name === 'oneday'
+    const res = rewriteFlat(ast!, {
+      name: (name) => isFieldName(name) ? `"${name}"` : name,
+    });
+    expect(res).toBe(`EXTRACT ( day FROM TIMESTAMP '2001-02-16 20:38:40' ) AS "oneday"`);
+  });
+
 });
