@@ -1,6 +1,7 @@
 import { Filter, OrderBy, toRow, shouldSelectSeparately, getUniqueFields } from './database';
 import { Record } from './record';
 import {
+  FlatNode,
   FunctionCallNode,
   InfixNode,
   Kind,
@@ -9,8 +10,10 @@ import {
   Node as AST,
   PrefixNode,
   rewrite,
+  rewriteFlat,
   StarNode,
 } from './parser/ast';
+import { NAME } from './parser/parser';
 
 import {
   Field,
@@ -24,7 +27,7 @@ import {
 import { Document, Value } from './types';
 import { DialectEncoder } from './engine';
 import { toArray } from './misc';
-import { parse } from './parser/index';
+import { parse, parseFlat } from './parser/index';
 import { ViewModel } from './view';
 
 type Model = TableModel | ViewModel;
@@ -321,7 +324,7 @@ export class QueryBuilder {
     return filter;
   }
 
-  _resolveField(fullpath: string): { column: string; alias?: string } {
+  _resolveField(fullpath: string, flat?: boolean): { column: string; alias?: string } {
     const aliasMap = this.context.aliasMap;
     let alias,
       field: Field,
@@ -361,6 +364,10 @@ export class QueryBuilder {
       } else {
         return { column };
       }
+    }
+
+    if (flat) {
+      return { column: fullpath };
     }
 
     throw new Error(`Invalid field: ${fullpath}`);
@@ -420,7 +427,14 @@ export class QueryBuilder {
         name: (path: string) => this._resolveField(path).column,
         text: (str: string) => this.dialect.escape(str),
       };
+      const flat = {
+        name: (path: string) => this._resolveField(path, true).column,
+      };
       name.forEach((ast) => {
+        if (ast instanceof FlatNode) {
+          fields.push(rewriteFlat(ast as FlatNode, flat));
+          return;
+        }
         if (ast instanceof NameNode) {
           const path = ast.name;
           const match = /^([^.]+)\.\*$/.exec(path);
@@ -502,10 +516,11 @@ export class QueryBuilder {
     filter?: Filter,
     orderBy?: OrderBy,
     groupBy?: string[],
-    filterThunk?: (QueryBuilder) => string
+    filterThunk?: (QueryBuilder) => string,
+    flat?: boolean
   ): string {
     const query = this._select(
-      Array.isArray(name) ? name.map((entry) => parse(entry)) : name,
+      Array.isArray(name) ? name.map((entry) => (flat ? parseFlat(entry) : parse(entry))) : name,
       filter,
       orderBy,
       groupBy
@@ -746,6 +761,15 @@ function extendByFieldName(model: Model, filter: Filter, dotted: string) {
 }
 
 function extendByAst(model: Model, filter: Filter, ast: AST) {
+  if (ast.kind === Kind.FLAT) {
+    const flat = ast as FlatNode;
+    for (const token of flat.tokens) {
+      if (token.type === NAME) {
+        extendByFieldName(model, filter, token.text);
+      }
+    }
+    return;
+  }
   switch (ast.kind) {
     case Kind.NAME:
       extendByFieldName(model, filter, (ast as NameNode).name);

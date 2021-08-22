@@ -221,3 +221,60 @@ describe('query', () => {
     db.end();
   });
 });
+
+describe('expert fields', () => {
+  test('extract parts from date', async () => {
+    if (helper.DB_TYPE === 'sqlite3') {
+      return;
+    }
+    const db = helper.connectToDatabase(NAME);
+    const view = new ViewModel(db, {
+      table: 'order_item oi',
+      joins: [
+        {
+          table: 'product',
+          on: `oi.product_id = product.id`,
+        },
+        {
+          table: 'service_log sl',
+          on: `sl.product_code = product.sku`,
+        },
+      ],
+    });
+    const builder = new QueryBuilder(view, db.pool);
+    const sql = builder.select(
+      ['extract(year from oi.order.dateCreated) as "yearCreated"'],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+    const rows = await db.query(sql);
+    expect(rows[0].yearCreated).toBe(2018);
+    db.end();
+  });
+  test('conditional expressions', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const model = db.model('product');
+    const builder = new QueryBuilder(model, db.pool);
+    const sql = builder.select(
+      [
+        'name',
+        `case
+        when name like '%Apple%' then 'Apple'
+        when name like '%Orange%' then 'Orange'
+        else 'Other'
+        end as "productType"`,
+      ],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
+    const rows = await db.query(sql);
+    expect(/^(Apple|Other)$/.test(rows[0].productType)).toBe(true);
+    db.end();
+  });
+});

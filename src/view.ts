@@ -89,7 +89,7 @@ export class ViewModel {
 
           const options = {
             name: (path: string) => {
-              const match = /^([^.]+)\.(.+)$/.exec(path);
+              const match = /^([^.]+)\.([^.]+)$/.exec(path);
               if (match) {
                 const model = this.db.table(this.aliasMap[match[1]]).model;
                 const field = model.field(match[2]) as SimpleField;
