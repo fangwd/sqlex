@@ -903,5 +903,19 @@ describe('db.select', () => {
     expect(typeof rows[0].price).toBe('number');
     db.end();
   });
-});
 
+  test('safe fields', async () => {
+    if (helper.DB_TYPE === 'sqlite3') {
+      return;
+    }
+    const db = helper.connectToDatabase(NAME);
+    const options = {
+      fields: ['extract(year from oi.order.dateCreated) as "yearCreated"'],
+      from: 'order_item oi',
+      safe: true,
+    };
+    const rows = await db.select(options);
+    expect(rows[0].yearCreated).toBe(2018);
+    db.end();
+  });
+});

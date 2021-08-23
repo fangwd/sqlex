@@ -165,27 +165,6 @@ describe('query', () => {
     db.end();
   });
 
-  test('should auto-join', async () => {
-    const db = helper.connectToDatabase(NAME);
-    const view = new ViewModel(db, {
-      table: 'order_item oi',
-      joins: [
-        {
-          table: 'product p',
-          on: `oi.product_id = p.id`,
-        },
-        {
-          table: 'service_log sl',
-          on: `sl.product_code = p.sku`,
-        },
-      ],
-    });
-    const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId']);
-    const rows = await db.query(sql);
-    expect(typeof rows[0].userEmail).toBe('string');
-    db.end();
-  });
 
   test('should aggregate', async () => {
     const db = helper.connectToDatabase(NAME);
@@ -222,7 +201,7 @@ describe('query', () => {
   });
 });
 
-describe('expert fields', () => {
+describe('safe fields', () => {
   test('extract parts from date', async () => {
     if (helper.DB_TYPE === 'sqlite3') {
       return;
@@ -278,3 +257,63 @@ describe('expert fields', () => {
     db.end();
   });
 });
+
+describe('smart join', () => {
+  test('join with alias', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const view = new ViewModel(db, {
+      table: 'order_item oi',
+      joins: [
+        {
+          table: 'service_log sl',
+          on: `sl.product_code = oi.product.sku`,
+        },
+      ],
+    });
+    const builder = new QueryBuilder(view, db.pool);
+    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId']);
+    const rows = await db.query(sql);
+    expect(typeof rows[0].userEmail).toBe('string');
+    db.end();
+  });
+
+  test('join without alias', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const view = new ViewModel(db, {
+      table: 'order_item',
+      joins: [
+        {
+          table: 'service_log sl',
+          on: `sl.product_code = product.sku`,
+        },
+      ],
+    });
+    const builder = new QueryBuilder(view, db.pool);
+    const sql = builder.select(['order.user.email as userEmail', 'order.id as orderId']);
+    const rows = await db.query(sql);
+    expect(typeof rows[0].userEmail).toBe('string');
+    db.end();
+  });
+
+  test('join with user specified path', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const view = new ViewModel(db, {
+      table: 'order_item oi',
+      joins: [
+        {
+          table: 'product p',
+          on: `oi.product_id = p.id`,
+        },
+        {
+          table: 'service_log sl',
+          on: `sl.product_code = p.sku`,
+        },
+      ],
+    });
+    const builder = new QueryBuilder(view, db.pool);
+    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId']);
+    const rows = await db.query(sql);
+    expect(typeof rows[0].userEmail).toBe('string');
+    db.end();
+  });
+})

@@ -54,7 +54,7 @@ export class Context {
     this.counter = 0;
   }
 
-  getAlias(builder: QueryBuilder): string {
+  getAliasForBuilder(builder: QueryBuilder) {
     const model = builder.model;
     const field = builder.field;
     const names: string[] = [];
@@ -62,11 +62,20 @@ export class Context {
       names.unshift(builder.field.name);
       builder = builder.parent;
     }
-    const alias = 't' + this.counter++;
-    if (field instanceof ForeignKeyField) {
-      this.aliasMap[names.join('.')] = { name: alias, model: model };
+    return this.getAlias(model, field, names);
+  }
+
+  getAlias(model: Model, field: Field, names: string[]) {
+    const key = names.join('.');
+    const entry = this.aliasMap[key];
+    if (!entry) {
+      const alias = 't' + this.counter++;
+      if (field instanceof ForeignKeyField) {
+        this.aliasMap[key] = { name: alias, model: model };
+      }
+      return { alias, seen: false };
     }
-    return alias;
+    return { alias: entry.name, seen: true };
   }
 }
 
@@ -78,7 +87,7 @@ export class QueryBuilder {
   dialect: DialectEncoder;
   context?: Context;
   alias: string;
-
+  skipJoin?: boolean;
   froms?: string[];
 
   fieldMap = {};
@@ -118,7 +127,9 @@ export class QueryBuilder {
       } else if (dialect instanceof RelatedField) {
         this.model = dialect.referencingField.model;
       }
-      this.alias = this.context.getAlias(this);
+      const {alias, seen}  = this.context.getAliasForBuilder(this);
+      this.alias = alias;
+      this.skipJoin = seen;
     }
   }
 
@@ -333,7 +344,7 @@ export class QueryBuilder {
 
     if (this.model instanceof ViewModel) {
       const match = /^([^\.]+)\.(.+)$/.exec(fullpath);
-      if (match) {
+      if (match && this.model.model(match[1])) {
         path = match[2];
         model = this.model.model(match[1]);
       }
@@ -396,7 +407,7 @@ export class QueryBuilder {
     groupBy?: string[]
   ): SelectQuery {
     if (this.model instanceof ViewModel) {
-      this.froms = [this.model.from];
+      this.froms = [this.model.buildFrom(this, filter)];
     } else {
       this.froms = [`${this.escapeId(this.model.table.name)} ${this.escapeId(this.alias) || ''}`];
     }
@@ -577,11 +588,12 @@ export class QueryBuilder {
       }
     }
 
-    const name = `${this.escapeId(model.table.name)} ${builder.alias}`;
-    const lhs = this.encodeField(field);
-    const rhs = builder.encodeField(model.keyField());
-
-    this.getFroms().push(`${name} on ${lhs}=${rhs}`);
+    if (!builder.skipJoin) {
+      const name = `${this.escapeId(model.table.name)} ${builder.alias}`;
+      const lhs = this.encodeField(field);
+      const rhs = builder.encodeField(model.keyField());
+      this.getFroms().push(`${name} on ${lhs}=${rhs}`);
+    }
 
     return builder.where(args);
   }

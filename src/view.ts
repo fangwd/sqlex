@@ -1,6 +1,7 @@
-import { Database } from './database';
+import { Database, Filter } from './database';
+import { QueryBuilder } from './filter';
 import { parse, Node as ASTNode } from './parser';
-import { Kind, NameNode, rewrite } from './parser/ast';
+import { InfixNode, Kind, NameNode, rewrite, visit } from './parser/ast';
 import { ComputedField, Field, ForeignKeyField, Schema, SimpleField } from './schema';
 
 type TableEntry = string;
@@ -26,7 +27,6 @@ export class ViewModel {
   fieldMap: { [key: string]: SimpleField | ComputedField };
   aliasMap: { [key: string]: string }; // prefix -> table_name
   options: ViewOptions;
-  from: string;
 
   constructor(db: Database, options: ViewOptions) {
     this.db = db;
@@ -36,7 +36,6 @@ export class ViewModel {
     this.fields = [];
     this.fieldMap = {};
     this.aliasMap = this.buildAliasMap();
-    this.from = this.buildFrom();
 
     this.buildFields();
   }
@@ -71,7 +70,7 @@ export class ViewModel {
     }
   }
 
-  private buildFrom() {
+  buildFrom(builder:QueryBuilder, filter:Filter) {
     const options = this.options;
     const froms = [];
 
@@ -80,20 +79,53 @@ export class ViewModel {
     const { name, alias } = parseTable(options.table);
     froms.push(id(name) + ' ' + id(alias));
 
+    let prevAlias = alias;
+    let prevModel = this.db.table(name)!.model;
+
     if (options.joins) {
       for (const entry of options.joins) {
         const { name, alias } = parseTable(entry.table);
         let join = (entry.type || 'inner') + ' join ' + id(name) + ' ' + id(alias);
         if (entry.type !== 'cross') {
           const expr = parse(entry.on!);
-
+          visit(expr, (name) => builder._extendFilter(filter, [name]));
           const options = {
             name: (path: string) => {
-              const match = /^([^.]+)\.([^.]+)$/.exec(path);
+              const match = /^([^.]+)\.(.+)$/.exec(path);
               if (match) {
-                const model = this.db.table(this.aliasMap[match[1]]).model;
-                const field = model.field(match[2]) as SimpleField;
-                return id(match[1]) + '.' + id(field.column.name);
+                const path = match[2].split('.');
+                if (path.length === 1 && this.aliasMap[match[1]]) {
+                  const model = this.db.table(this.aliasMap[match[1]]).model;
+                  const field = model.field(match[2]) as SimpleField;
+                  return id(match[1]) + '.' + id(field.column.name);
+                }
+                else {
+                  const context = builder.context!;
+                  const names = [];
+
+                  const first = this.aliasMap[match[1]];
+                  if (first) {
+                    prevAlias = match[1];
+                    prevModel = this.db.table(first)!.model;
+                  }
+                  else {
+                    path.unshift(match[1])
+                  }
+
+                  for (let i = 0; i < path.length - 1; i++) {
+                    const field =  (prevModel.field(path[i]) as ForeignKeyField);
+                    names.push(path[i]);
+                    const model = field.referencedField.model;
+                    const alias = context.getAlias(model, field, names).alias;
+                    const lhs = `${id(prevAlias)}.${id(field.column.name)}`;
+                    const rhs = `${id(alias)}.${id(model.keyField().column.name)}`;
+                    froms.push(`join ${id(model.table.name)} ${id(alias)} on ${lhs} = ${rhs}`)
+                    prevModel = model;
+                    prevAlias = alias;
+                  }
+                  const field = prevModel.field(path[path.length - 1]) as SimpleField;
+                  return id(prevAlias) + '.' + id(field.column.name);
+                }
               }
               return id((this.fieldMap[path] as SimpleField).column.name);
             },

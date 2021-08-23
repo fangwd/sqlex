@@ -177,6 +177,37 @@ function encodeValue(ast: ValueNode, encoder: (s: string) => string) {
   }
 }
 
+export function visit(ast: Node, nameCb: (name: string) => void) {
+  switch (ast.kind) {
+    case Kind.NAME:
+      nameCb((ast as NameNode).name);
+      break;
+    case Kind.INFIX:
+      visit((ast as InfixNode).lhs, nameCb);
+      visit((ast as InfixNode).rhs, nameCb);
+      break;
+    case Kind.FCALL:
+      visit((ast as FunctionCallNode).args, nameCb);
+      break;
+    case Kind.LIST:
+      (ast as ListNode).list.map((e) => visit(e, nameCb));
+      break;
+    case Kind.PREFIX:
+      visit((ast as PrefixNode).expr, nameCb);
+      break;
+    case Kind.STAR:
+    case Kind.VALUE:
+      break;
+    case Kind.FLAT:
+      for (const token of (ast as FlatNode).tokens) {
+        if (token.type === Token.NAME) {
+          nameCb(token.text);
+        }
+      }
+      break;
+  }
+}
+
 export function rewrite(ast: Node, options: RewriteOptions) {
   let result: string;
   switch (ast.kind) {

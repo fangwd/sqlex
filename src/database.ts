@@ -194,15 +194,22 @@ export class Database {
 
   async select(options: DatabaseSelectOptions, connection?: Connection): Promise<Document[]> {
     if (typeof options.from === 'string') {
-      return this.table(options.from).select(options.fields, pluck(options, SelectOptionKeys));
+      if (!options.safe) {
+        return this.table(options.from).select(options.fields, pluck(options, SelectOptionKeys));
+      }
+      else {
+        options = { ...options, from: { table: options.from } };
+      }
     }
-    const view = new ViewModel(this, options.from);
+    const view = new ViewModel(this, options.from as ViewOptions);
     const builder = new QueryBuilder(view, this.pool);
     let query = builder.select(
       typeof options.fields === 'string' ? [options.fields] : options.fields,
       options.where,
       options.orderBy,
-      options.groupBy
+      options.groupBy,
+      undefined,
+      options.safe,
     );
     if (options.limit !== undefined) {
       query += ` limit ${+options.limit}`;
@@ -240,7 +247,8 @@ export const SelectOptionKeys: (keyof SelectOptions)[] = [
 
 export interface DatabaseSelectOptions extends SelectOptions {
   fields: string | string[],
-  from: string | ViewOptions
+  from: string | ViewOptions,
+  safe?: boolean,
 }
 
 export class Table {
