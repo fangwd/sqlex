@@ -204,7 +204,7 @@ test('order by', () => {
     orderBy: ['-order.code', 'order.user.email', 'quantity']
   };
   const builder = new QueryBuilder(model, DefaultEscape);
-  const sql = builder.select('*', args.where, args.orderBy);
+  const sql = builder.select('*', args);
   expect(/`t\d\`.`email`\s+ASC/i.test(sql)).toBe(true);
   expect(/`t\d\`.`code`\s+DESC/i.test(sql)).toBe(true);
 });
@@ -310,6 +310,38 @@ describe('not null', () => {
     const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
     expect(rows.length).toBe(2);
     expect(rows[0].content).toBe('comment 2');
+    db.end();
+  });
+});
+
+describe('having', () => {
+  test('filter only on aggregate values', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const rows = await db.table('order_item').select(['order.id', 'count(*) as itemCount'], {
+      groupBy: ['order.id'],
+      having: { itemCount_gt: 2 },
+    });
+    expect(+rows[0].itemCount).toBeGreaterThan(2);
+    db.end();
+  });
+  test('filter on aggregate values and grouped by values', async () => {
+    const db = helper.connectToDatabase(NAME);
+    const rows = await db.table('order_item').select(['product.name', 'count(*) as itemCount'], {
+      groupBy: ['product.name'],
+      having: { itemCount_lt: 2, name_like: 'Australia%' },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].name).toContain('Banana');
+    const rows2 = await db.select({
+      fields: ['product.name', 'count(*) as itemCount'],
+      from: {
+        table: 'order_item',
+      },
+      groupBy: ['product.name'],
+      having: { itemCount_lt: 2, name_like: 'Australia%' },
+    });
+    expect(rows2.length).toBe(1);
+    expect(rows2[0].name).toContain('Banana');
     db.end();
   });
 });

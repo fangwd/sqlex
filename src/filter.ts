@@ -1,4 +1,4 @@
-import { Filter, OrderBy, toRow, shouldSelectSeparately, getUniqueFields } from './database';
+import { Filter, OrderBy, toRow, shouldSelectSeparately, getUniqueFields, SelectOptions } from './database';
 import { Record } from './record';
 import {
   FlatNode,
@@ -13,7 +13,7 @@ import {
   rewriteFlat,
   StarNode,
 } from './parser/ast';
-import { NAME } from './parser/parser';
+import { AS, NAME } from './parser/parser';
 
 import {
   Field,
@@ -43,6 +43,7 @@ export interface SelectQuery {
   where?: string;
   orderBy?: string;
   groupBy?: string;
+  having?: string;
 }
 
 export class Context {
@@ -79,6 +80,16 @@ export class Context {
   }
 }
 
+type FieldEntry = {
+  expr: string; // escaped
+  name: string; // non-escaped
+  skip?: boolean;
+};
+
+type HavingContext = {
+  fieldMap: {[key:string]: FieldEntry};
+}
+
 export class QueryBuilder {
   model: Model;
   field?: Field;
@@ -91,6 +102,7 @@ export class QueryBuilder {
   froms?: string[];
 
   fieldMap = {};
+  having?: HavingContext;
 
   getFroms() {
     let builder: QueryBuilder = this;
@@ -127,7 +139,7 @@ export class QueryBuilder {
       } else if (dialect instanceof RelatedField) {
         this.model = dialect.referencingField.model;
       }
-      const {alias, seen}  = this.context.getAliasForBuilder(this);
+      const { alias, seen } = this.context.getAliasForBuilder(this);
       this.alias = alias;
       this.skipJoin = seen;
     }
@@ -135,7 +147,9 @@ export class QueryBuilder {
 
   where(args: Filter): string {
     if (!args) return '';
-    args = plainify(args);
+    if (!this.having) {
+      args = plainify(args);
+    }
     if (Array.isArray(args)) {
       return this.or(args);
     } else {
@@ -160,7 +174,7 @@ export class QueryBuilder {
     const exprs: string[] = [];
     for (const key in args) {
       const [name, operator] = splitKey(key);
-      const field = this.model.field(name);
+      const field = this.having ? null : this.model.field(name);
       const value = args[key];
       if (field instanceof ForeignKeyField) {
         const query = value as Filter;
@@ -199,13 +213,13 @@ export class QueryBuilder {
             if (relatedField instanceof RelatedField) {
               const referencingField = relatedField.referencingField;
               const builder = new QueryBuilder(referencingField.model, this.dialect);
-              let filter = query[keys[0]] as Filter;
+              let where = query[keys[0]] as Filter;
               if (relatedField.throughField && relatedField.name === keys[0]) {
-                filter = {
-                  [relatedField.throughField.name]: filter,
+                where = {
+                  [relatedField.throughField.name]: where,
                 };
               }
-              const rhs = builder.select(referencingField, filter);
+              const rhs = builder.select(referencingField, { where });
               const lhs = this.alias
                 ? `${this.prefix(this.alias)}${this.escapeId(field)}`
                 : this.escapeId(field);
@@ -251,6 +265,13 @@ export class QueryBuilder {
         exprs.push('not (' + filters.map((c) => this.and(c)).join(' or ') + ')');
       } else if (field instanceof ComputedField) {
         exprs.push(this.expr(field, operator, value));
+      } else if (this.having) {
+        const lhs = this.having.fieldMap[name].expr;
+        const rhs =
+          typeof value === 'number' || typeof value === 'boolean'
+            ? value
+            : this.dialect.escape(value);
+        exprs.push(`${lhs} ${operator} ${rhs}`);
       } else if (name !== '*') {
         throw Error(`Bad field: ${this.model.name}.${name}`);
       }
@@ -370,7 +391,7 @@ export class QueryBuilder {
     if (field instanceof SimpleField) {
       const column = `${this.prefix(alias)}${this.escapeId(field)}`;
       if (match) {
-        const name = this.escapeId(path.replace(/\./g, '__'));
+        const name = path.replace(/\./g, '__');
         return { column, alias: name };
       } else {
         return { column };
@@ -384,9 +405,9 @@ export class QueryBuilder {
     throw new Error(`Invalid field: ${fullpath}`);
   }
 
-  _pushField(fields: string[], path: string) {
+  _pushField(fields: FieldEntry[], path: string) {
     const { column, alias } = this._resolveField(path);
-    fields.push(alias ? `${column} as ${alias}` : column);
+    fields.push({ expr: column, name: alias });
     return column;
   }
 
@@ -402,10 +423,9 @@ export class QueryBuilder {
 
   _select(
     name: string | SimpleField | Document | AST[],
-    filter: Filter = {},
-    orderBy?: OrderBy,
-    groupBy?: string[]
+    { where: filter, orderBy, groupBy, having }: SelectOptions
   ): SelectQuery {
+    filter = filter || {};
     if (this.model instanceof ViewModel) {
       this.froms = [this.model.buildFrom(this, filter)];
     } else {
@@ -430,9 +450,24 @@ export class QueryBuilder {
 
     const where = this.where(filter).trim();
 
-    let fields = [];
+    const fields: FieldEntry[] = [];
     if (name instanceof Field || typeof name === 'string') {
-      fields.push(this.encodeField(name));
+      const entry = {
+        name: typeof name === 'string' ? name : name.column.name,
+        expr: this.encodeField(name),
+      };
+      fields.push(entry);
+      if (name === '*') {
+        for (const field of this.model.fields) {
+          if (field instanceof SimpleField) {
+            fields.push({
+              expr: this.encodeField(field),
+              name: field.name,
+              skip: true,
+            });
+          }
+        }
+      }
     } else if (Array.isArray(name)) {
       const options = {
         name: (path: string) => this._resolveField(path).column,
@@ -443,7 +478,9 @@ export class QueryBuilder {
       };
       name.forEach((ast) => {
         if (ast instanceof FlatNode) {
-          fields.push(rewriteFlat(ast as FlatNode, flat));
+          const node = ast as FlatNode;
+          const expr = rewriteFlat(node, flat);
+          fields.push({ expr, name: node.alias });
           return;
         }
         if (ast instanceof NameNode) {
@@ -455,9 +492,8 @@ export class QueryBuilder {
             for (const field of model.fields) {
               if (field instanceof SimpleField) {
                 const prefix = this.dialect.escapeId(match[1]);
-                const name = this.dialect.escapeId(field.column.name);
-                const alias = this.dialect.escapeId(field.name);
-                fields.push(`${prefix}.${name} as ${alias}`);
+                const expr = `${prefix}.${this.escapeId(field.column.name)}`;
+                fields.push({ expr, name: field.name });
               }
             }
             return;
@@ -469,23 +505,22 @@ export class QueryBuilder {
             for (const field of model.fields) {
               if (field instanceof SimpleField) {
                 const prefix = this.dialect.escapeId(key);
-                const name = this.dialect.escapeId(field.column.name);
-                const alias = this.dialect.escapeId(field.name);
-                fields.push(`${prefix}.${name} as ${alias}`);
+                const expr = `${prefix}.${this.escapeId(field.column.name)}`;
+                fields.push({ name: field.name, expr });
               }
             }
           }
           return;
         }
-        const name = rewrite(ast, options);
-        let alias;
+        const expr = rewrite(ast, options);
+        let name;
         if (ast.alias) {
-          alias = this.dialect.escapeId(ast.alias);
+          name = ast.alias;
         } else if (ast.kind === Kind.NAME) {
           const field = this.model.field((ast as NameNode).name);
-          alias = this.dialect.escapeId(field.name);
+          name = field.name;
         }
-        fields.push(alias ? `${name} as ${alias}` : name);
+        fields.push({ name, expr });
       });
     } else {
       const names = getFields(this.model, name, this.fieldMap);
@@ -513,28 +548,51 @@ export class QueryBuilder {
       });
     }
 
+    let havingPart = undefined;
+    if (having) {
+      this.having = {
+        fieldMap: fields.reduce((map, field) => {
+          map[field.name] = field;
+          return map;
+        }, {}),
+      };
+      havingPart = this.where(having);
+      this.having = undefined;
+    }
+
     return {
-      fields: fields.join(', '),
+      fields: fields
+        .filter((field) => !field.skip)
+        .map((field) =>
+          field.name && field.name !== '*'
+            ? `${field.expr} as ${this.escapeId(field.name)}`
+            : field.expr
+        )
+        .join(', '),
       tables: this.froms.join(' left join '),
       where,
       orderBy: orderBy ? (orderBy as string[]).join(', ') : null,
       groupBy: groupByPart,
+      having: havingPart,
     };
   }
 
   select(
     name: string | SimpleField | Document | string[],
-    filter?: Filter,
-    orderBy?: OrderBy,
-    groupBy?: string[],
-    filterThunk?: (QueryBuilder) => string,
-    flat?: boolean
+    {
+      where,
+      orderBy,
+      groupBy,
+      raw,
+      filterThunk,
+      having,
+    }: SelectOptions & {
+      filterThunk?: (QueryBuilder) => string;
+    }
   ): string {
     const query = this._select(
-      Array.isArray(name) ? name.map((entry) => (flat ? parseFlat(entry) : parse(entry))) : name,
-      filter,
-      orderBy,
-      groupBy
+      Array.isArray(name) ? name.map((entry) => (raw ? parseFlat(entry) : parse(entry))) : name,
+      { where, orderBy, groupBy, having }
     );
     let sql = `select ${query.fields} from ${query.tables}`;
     if (query.where) {
@@ -556,6 +614,9 @@ export class QueryBuilder {
     }
     if (query.orderBy) {
       sql += ` order by ${query.orderBy}`;
+    }
+    if (query.having) {
+      sql += ` having ${query.having}`;
     }
     return sql;
   }
@@ -606,7 +667,7 @@ export class QueryBuilder {
       return this.expr(field, null, args[keys[0]]);
     }
     const lhs = this.encodeField(field.column.name);
-    const rhs = builder.select(model.keyField().column.name, args);
+    const rhs = builder.select(model.keyField().column.name, { where: args });
     return `${lhs} in (${rhs})`;
   }
 
@@ -617,7 +678,7 @@ export class QueryBuilder {
 
     const keyField = field.referencingField.referencedField;
     const scope =
-      builder.select('*') +
+      builder.select('*', {}) +
       ' where ' +
       builder.encodeField(field.referencingField.column.name) +
       '=' +

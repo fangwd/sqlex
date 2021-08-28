@@ -904,7 +904,7 @@ describe('db.select', () => {
     db.end();
   });
 
-  test('safe fields', async () => {
+  test('raw fields', async () => {
     if (helper.DB_TYPE === 'sqlite3') {
       return;
     }
@@ -912,7 +912,7 @@ describe('db.select', () => {
     const options = {
       fields: ['extract(year from oi.order.dateCreated) as "yearCreated"'],
       from: 'order_item oi',
-      safe: true,
+      raw: true,
     };
     const rows = await db.select(options);
     expect(rows[0].yearCreated).toBe(2018);

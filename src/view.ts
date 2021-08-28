@@ -70,7 +70,7 @@ export class ViewModel {
     }
   }
 
-  buildFrom(builder:QueryBuilder, filter:Filter) {
+  buildFrom(builder: QueryBuilder, filter: Filter) {
     const options = this.options;
     const froms = [];
 
@@ -98,8 +98,7 @@ export class ViewModel {
                   const model = this.db.table(this.aliasMap[match[1]]).model;
                   const field = model.field(match[2]) as SimpleField;
                   return id(match[1]) + '.' + id(field.column.name);
-                }
-                else {
+                } else {
                   const context = builder.context!;
                   const names = [];
 
@@ -107,19 +106,18 @@ export class ViewModel {
                   if (first) {
                     prevAlias = match[1];
                     prevModel = this.db.table(first)!.model;
-                  }
-                  else {
-                    path.unshift(match[1])
+                  } else {
+                    path.unshift(match[1]);
                   }
 
                   for (let i = 0; i < path.length - 1; i++) {
-                    const field =  (prevModel.field(path[i]) as ForeignKeyField);
+                    const field = prevModel.field(path[i]) as ForeignKeyField;
                     names.push(path[i]);
                     const model = field.referencedField.model;
                     const alias = context.getAlias(model, field, names).alias;
                     const lhs = `${id(prevAlias)}.${id(field.column.name)}`;
                     const rhs = `${id(alias)}.${id(model.keyField().column.name)}`;
-                    froms.push(`join ${id(model.table.name)} ${id(alias)} on ${lhs} = ${rhs}`)
+                    froms.push(`join ${id(model.table.name)} ${id(alias)} on ${lhs} = ${rhs}`);
                     prevModel = model;
                     prevAlias = alias;
                   }
@@ -141,17 +139,22 @@ export class ViewModel {
     return froms.join(' ');
   }
 
-  model(alias:string) {
+  model(alias: string) {
     return this.schema.model(this.aliasMap[alias]);
   }
 
-  field(path:string) {
+  field(path: string) {
     const dot = path.indexOf('.');
     if (dot > -1) {
       const alias = path.substring(0, dot);
-      const name = path.substring(dot+1);
-      const model = this.db.table(this.aliasMap[alias]).model;
-      return model.field(name);
+      if (this.aliasMap[alias]) {
+        const name = path.substring(dot + 1);
+        const model = this.db.table(this.aliasMap[alias]).model;
+        return model.field(name);
+      } else {
+        const model = this.db.table(this.options.table).model;
+        return model.field(path);
+      }
     }
     return this.fieldMap[path];
   }

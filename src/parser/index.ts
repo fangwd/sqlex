@@ -1,7 +1,15 @@
-import { FlatNode, Node, Statement } from './ast';
+import { FlatNode, NameNode, Node, Statement } from './ast';
 import { Dialect, isReserved } from './keywords';
 import Lexer from './lexer';
-import { NAME, Parser, RESERVED, YYEOF, YYPUSH_MORE, YYUNDEF } from './parser';
+import {
+  AS,
+  NAME,
+  Parser,
+  RESERVED,
+  YYEOF,
+  YYPUSH_MORE,
+  YYUNDEF,
+} from './parser';
 
 export function parse(formula: string): Node | undefined {
   const lexer = new Lexer(formula);
@@ -19,6 +27,7 @@ export function parse(formula: string): Node | undefined {
 export function parseFlat(formula: string, dialect?: Dialect): FlatNode {
   const lexer = new Lexer(formula);
   const node = new FlatNode();
+  const tokens = [];
   while (true) {
     const type = lexer.lex();
     if (type === YYEOF) {
@@ -28,6 +37,27 @@ export function parseFlat(formula: string, dialect?: Dialect): FlatNode {
       throw Error(`Unknown token at ${lexer.cursor}`);
     }
     const text = lexer.yytext();
+    tokens.push({
+      type,
+      text,
+      value: lexer.value,
+    });
+  }
+
+  const length = tokens.length;
+  let ignore = 0;
+  if (length > 2) {
+    if (tokens[length - 2].type === AS) {
+      const last = tokens[length - 1].value;
+      if (last instanceof NameNode) {
+        node.alias = last.name;
+        ignore = 2;
+      }
+    }
+  }
+
+  for (let i = 0; i < length - ignore; i++) {
+    const { type, text } = tokens[i];
     if (type === NAME) {
       const upper = text.toUpperCase();
       if (isReserved(upper, dialect)) {
@@ -39,6 +69,7 @@ export function parseFlat(formula: string, dialect?: Dialect): FlatNode {
       node.tokens.push({ type, text });
     }
   }
+
   return node;
 }
 

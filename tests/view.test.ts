@@ -68,11 +68,9 @@ describe('query', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(
-      ['sl.customerEmail', 'p.name as productName'],
-      undefined,
-      'sl.customerEmail'
-    );
+    const sql = builder.select(['sl.customerEmail', 'p.name as productName'], {
+      orderBy: 'sl.customerEmail',
+    });
     const rows = await db.query(sql);
     expect(rows).toEqual([
       {
@@ -104,7 +102,7 @@ describe('query', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(['*']);
+    const sql = builder.select(['*'], {});
     const rows = await db.query(sql);
     expect('stockQuantity' in rows[0]).toBe(true);
     db.end();
@@ -127,7 +125,7 @@ describe('query', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(['sl.*', 'u.firstName', 'p.name as productName', 'p.price']);
+    const sql = builder.select(['sl.*', 'u.firstName', 'p.name as productName', 'p.price'], {});
     const rows = await db.query(sql);
     expect(rows.length).toBe(2);
     expect(Object.keys(rows[0]).sort()).toEqual([
@@ -157,14 +155,16 @@ describe('query', () => {
     });
     const builder = new QueryBuilder(view, db.pool);
     if (process.env.DB_TYPE !== 'sqlite3') {
-      const sql = builder.select(['p.*', 'u.firstName', "concat(p.name, '@', p.price) as product"]);
+      const sql = builder.select(
+        ['p.*', 'u.firstName', "concat(p.name, '@', p.price) as product"],
+        {}
+      );
       const rows = await db.query(sql);
       const info = (rows[0] as any).product;
       expect(info.indexOf('@')).toBeGreaterThan(-1);
     }
     db.end();
   });
-
 
   test('should aggregate', async () => {
     const db = helper.connectToDatabase(NAME);
@@ -189,9 +189,7 @@ describe('query', () => {
         'count(*)',
         'avg(product.price) as price',
       ],
-      undefined,
-      undefined,
-      ['oi.order.user.email', 'product.name']
+      { groupBy: ['oi.order.user.email', 'product.name'] }
     );
     expect(/\bproduct.\..name.$/.test(sql)).toBe(true);
     const rows = await db.query(sql);
@@ -201,7 +199,7 @@ describe('query', () => {
   });
 });
 
-describe('safe fields', () => {
+describe('raw fields', () => {
   test('extract parts from date', async () => {
     if (helper.DB_TYPE === 'sqlite3') {
       return;
@@ -221,14 +219,9 @@ describe('safe fields', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(
-      ['extract(year from oi.order.dateCreated) as "yearCreated"'],
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true
-    );
+    const sql = builder.select(['extract(year from oi.order.dateCreated) as "yearCreated"'], {
+      raw: true,
+    });
     const rows = await db.query(sql);
     expect(rows[0].yearCreated).toBe(2018);
     db.end();
@@ -246,11 +239,7 @@ describe('safe fields', () => {
         else 'Other'
         end as "productType"`,
       ],
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true
+      { raw: true }
     );
     const rows = await db.query(sql);
     expect(/^(Apple|Other)$/.test(rows[0].productType)).toBe(true);
@@ -271,7 +260,7 @@ describe('smart join', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId']);
+    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId'], {});
     const rows = await db.query(sql);
     expect(typeof rows[0].userEmail).toBe('string');
     db.end();
@@ -289,7 +278,7 @@ describe('smart join', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(['order.user.email as userEmail', 'order.id as orderId']);
+    const sql = builder.select(['order.user.email as userEmail', 'order.id as orderId'], {});
     const rows = await db.query(sql);
     expect(typeof rows[0].userEmail).toBe('string');
     db.end();
@@ -311,9 +300,9 @@ describe('smart join', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId']);
+    const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId'], {});
     const rows = await db.query(sql);
     expect(typeof rows[0].userEmail).toBe('string');
     db.end();
   });
-})
+});

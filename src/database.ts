@@ -28,13 +28,12 @@ import {
 
 export type Filter = Document | Document[];
 
-import { encodeFilter, QueryBuilder, AND } from './filter';
+import { encodeFilter, QueryBuilder } from './filter';
 import { toArray } from './misc';
 
 import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
 import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
-import { parse } from './parser';
 import { ViewModel, ViewOptions } from './view';
 import { pluck } from './utils';
 
@@ -194,22 +193,17 @@ export class Database {
 
   async select(options: DatabaseSelectOptions, connection?: Connection): Promise<Document[]> {
     if (typeof options.from === 'string') {
-      if (!options.safe) {
-        return this.table(options.from).select(options.fields, pluck(options, SelectOptionKeys));
+      const table = this.table(options.from);
+      if (table) {
+        return table.select(options.fields, pluck(options, SelectOptionKeys));
       }
-      else {
-        options = { ...options, from: { table: options.from } };
-      }
+      options = { ...options, from: { table: options.from } };
     }
     const view = new ViewModel(this, options.from as ViewOptions);
     const builder = new QueryBuilder(view, this.pool);
     let query = builder.select(
       typeof options.fields === 'string' ? [options.fields] : options.fields,
-      options.where,
-      options.orderBy,
-      options.groupBy,
-      undefined,
-      options.safe,
+      options,
     );
     if (options.limit !== undefined) {
       query += ` limit ${+options.limit}`;
@@ -235,6 +229,10 @@ export interface SelectOptions {
   limit?: number;
   orderBy?: OrderBy;
   groupBy?: string[];
+  having?: Filter;
+
+  // When raw is true, fields will not be syntax-checked.
+  raw?: boolean;
 }
 
 export const SelectOptionKeys: (keyof SelectOptions)[] = [
@@ -243,12 +241,14 @@ export const SelectOptionKeys: (keyof SelectOptions)[] = [
   'limit',
   'orderBy',
   'groupBy',
+  'having',
+
+  'raw',
 ];
 
 export interface DatabaseSelectOptions extends SelectOptions {
   fields: string | string[],
   from: string | ViewOptions,
-  safe?: boolean,
 }
 
 export class Table {
@@ -536,13 +536,7 @@ export class Table {
   ): Promise<Row[]> {
     const builder = new QueryBuilder(this.model, this.db.pool);
 
-    let sql = builder.select(
-      fields,
-      options.where,
-      options.orderBy,
-      options.groupBy,
-      filterThunk
-    );
+    let sql = builder.select(fields, options);
 
     if (options.limit !== undefined) {
       sql += ` limit ${parseInt(options.limit + '')}`;
