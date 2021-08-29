@@ -36,6 +36,7 @@ import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
 import { ViewModel, ViewOptions } from './view';
 import { pluck } from './utils';
+import { mock, cleanup } from './mock';
 
 export class ClosureTable {
   constructor(
@@ -218,6 +219,10 @@ export class Database {
       return result;
     }
     return connection.query(query);
+  }
+
+  async cleanup() {
+    await cleanup(this);
   }
 }
 
@@ -1446,6 +1451,14 @@ export class Table {
       : selectTree2(this, filter));
     const serialiser = new JsonSerialiser(data);
     return serialiser.serialise(this.model);
+  }
+
+  mock(data:Document) {
+    return mock(this, data);
+  }
+
+  mockMany(data:Document[]) {
+    return mock(this, data);
   }
 }
 

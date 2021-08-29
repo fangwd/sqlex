@@ -211,6 +211,29 @@ db.flush().then(async () => {
 });
 ```
 
+## Creating testing records
+
+sqlex provides an extremely way to create table records for testing purposes and to delete the records afterwards. Here is an example to create an order with 2 items:
+```js
+ const order = await table.table('order').mock({
+      orderItems: [
+        {
+          product: {
+            price: 0,
+          },
+          quantity: 100,
+        },
+        {
+          quantity: 200,
+        },
+      ],
+    });
+// making tests...
+await db.cleanup();
+```
+
+You only need to specify fields that you are goint to test against, and sqlex will automatically populate other fields that cannot be null. When you are done with the test records, `db.cleanup()` will delete them from the database so that they don't affect other tests.
+
 ## Importing and exporting
 
 This example populates the category table with a list of objects. Properties other than `name`, `parent_name`, and `parent_parent` are saved to a table called `category_attribute` table using a key/value fashion:

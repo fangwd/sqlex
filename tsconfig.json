@@ -2,7 +2,7 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "es6",
-    "types": [],
+    "types": ["jest"],
     "typeRoots": ["node_modules/@types"],
     "sourceMap": true,
     "outDir": "dist",

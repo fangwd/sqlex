@@ -57,12 +57,12 @@ export abstract class Connection implements DialectEncoder {
       const promise = callback(this);
       if (promise instanceof Promise) {
         const result = await promise;
-        this.commit();
+        await this.commit();
         return result;
       }
       // else: caller has dealt with the transaction
     } catch (error) {
-      this.rollback();
+      await this.rollback();
       throw error;
     }
   }

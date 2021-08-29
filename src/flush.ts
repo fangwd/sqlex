@@ -547,6 +547,7 @@ export function dumpDirtyRecords(db: Database, all: boolean = false) {
       tables[table.model.name] = records;
     }
   }
+  console.log(JSON.stringify(tables, null, 4))
 }
 
 function makeMapTable(table: Table) {

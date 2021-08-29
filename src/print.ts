@@ -160,7 +160,9 @@ export function printSchemaTypeScript(
   return lines.join('\n');
 }
 
-function getTypeName(name: string) {
+export type DataType = 'Date' | 'number' | 'string' | 'boolean';
+
+export function getTypeName(name: string) : DataType {
   if (/date|time/i.test(name)) {
     return 'Date';
   }
