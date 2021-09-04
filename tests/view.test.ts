@@ -15,10 +15,11 @@ describe('fields', () => {
       table: 'service_log',
     });
     const fields = view.fields;
-    expect(fields.length).toBe(3);
+    expect(fields.length).toBe(4);
     expect(fields[0].name).toBe('id');
     expect(fields[1].name).toBe('productCode');
     expect(fields[2].name).toBe('customerEmail');
+    expect(fields[3].name).toBe('serviceTime');
     db.end();
   });
   test('should have all fields of all tables when joined', () => {
@@ -43,7 +44,7 @@ describe('fields', () => {
     expect(fields[0].name).toBe('id');
     expect(fields[1].name).toBe('productCode');
     expect(fields[2].name).toBe('customerEmail');
-    expect(fields[4].name).toBe(fields2[1].name);
+    expect(fields[5].name).toBe(fields2[1].name);
     // service_log.id to be shadowed by product.id
     expect(view.field('id').model.name).toBe('Product');
     db.end();
@@ -135,6 +136,7 @@ describe('query', () => {
       'price',
       'productCode',
       'productName',
+      'serviceTime',
     ]);
     db.end();
   });

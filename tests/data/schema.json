@@ -849,6 +849,11 @@
           "name": "customer_email",
           "type": "string",
           "size": 60
+        },
+        {
+          "name": "service_time",
+          "type": "datetime",
+          "nullable": true
         }
       ],
       "constraints": [
