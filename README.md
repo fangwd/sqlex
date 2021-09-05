@@ -215,7 +215,7 @@ db.flush().then(async () => {
 
 sqlex provides an extremely way to create table records for testing purposes and to delete the records afterwards. Here is an example to create an order with 2 items:
 ```js
- const order = await table.table('order').mock({
+ const order = await db.table('order').mock({
       orderItems: [
         {
           product: {
@@ -229,6 +229,7 @@ sqlex provides an extremely way to create table records for testing purposes and
       ],
     });
 // making tests...
+// ...
 await db.cleanup();
 ```
 
