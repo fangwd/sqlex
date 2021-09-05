@@ -4,7 +4,6 @@ export {
   Filter,
   SelectOptions,
   toDocument,
-  toRow
 } from './database';
 
 export {

@@ -223,7 +223,8 @@ test('throughField', async () => {
 const DefaultEscape = {
   dialect: '',
   escapeId: s => '`' + s + '`',
-  escape: s => "'" + (s + '').replace(/'/g, "\\'") + "'"
+  escape: s => "'" + (s + '').replace(/'/g, "\\'") + "'",
+  escapeDate: d => "'" + d.toISOString() + "'",
 };
 
 test('empty result', async () => {

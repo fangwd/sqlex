@@ -123,6 +123,7 @@ export async function createPostgresDatabase(
         .replace(/\buser\b/g, '"user"')
         .replace(/`/g, '"')
         .replace(/integer primary key auto_increment/, 'serial primary key')
+        .replace(/('\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z')/g, '$1::timestamptz')
     );
 
   for (const line of lines) {
@@ -169,7 +170,10 @@ function createMySQLDatabase(name: string, data = true): Promise<any> {
     `drop database if exists ${database}`,
     `create database ${database}`,
     `use ${database}`
-  ].concat(sql.split(';').filter(line => line.trim()));
+  ].concat(sql.split(';')
+   .filter(line => line.trim())
+   .map(line => line.replace(/\b(\d+-\d+-\d+)T(\d+:\d+:\d+\.\d+)Z\b/g, '$1 $2'))
+  );
 
   return serialise(line => {
     return new Promise((resolve, reject) => {

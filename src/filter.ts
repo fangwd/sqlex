@@ -1,4 +1,4 @@
-import { Filter, OrderBy, toRow, shouldSelectSeparately, getUniqueFields, SelectOptions } from './database';
+import { Filter, OrderBy, shouldSelectSeparately, getUniqueFields, SelectOptions } from './database';
 import { Record } from './record';
 import {
   FlatNode,
@@ -701,7 +701,10 @@ export class QueryBuilder {
         return value + '';
       }
     }
-    return this.dialect.escape(toRow(value, field) + '');
+    if (value && /date|time/i.test(field.column.type)) {
+      return this.dialect.escapeDate(new Date(value as string));
+    }
+    return this.dialect.escape(value + '');
   }
 
   private escapeId(name: string | SimpleField): string {

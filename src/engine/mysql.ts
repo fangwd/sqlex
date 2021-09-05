@@ -35,7 +35,20 @@ class _ConnectionPool extends ConnectionPool {
   escapeId(name: string) {
     return mysql.escapeId(name);
   }
+
+  escapeDate(date: Date) {
+    return escapeDate(date);
+  }
 }
+
+function escapeDate(date: Date) {
+  return mysql.escape(date
+    .toISOString()
+    .replace('T', ' ')
+    .replace(/Z$/, '')
+  );
+ }
+
 
 class _Connection extends Connection {
   dialect: Dialect = 'mysql';
@@ -89,6 +102,10 @@ class _Connection extends Connection {
 
   escapeId(name: string) {
     return mysql.escapeId(name);
+  }
+
+  escapeDate(date: Date) {
+    return escapeDate(date);
   }
 }
 

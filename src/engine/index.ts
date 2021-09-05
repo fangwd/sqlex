@@ -23,6 +23,7 @@ export type TransactionCallback = (
 export interface DialectEncoder {
   escape: (unsafe: any) => string;
   escapeId: (unsafe: string) => string;
+  escapeDate: (date:Date) => string;
 }
 
 export abstract class Connection implements DialectEncoder {
@@ -50,6 +51,7 @@ export abstract class Connection implements DialectEncoder {
 
   abstract escape(s: string): string;
   abstract escapeId(name: string): string;
+  abstract escapeDate(date: Date): string;
 
   async transaction(callback: TransactionCallback) {
     await this.beginTransaction();
@@ -77,6 +79,7 @@ export abstract class ConnectionPool implements DialectEncoder {
 
   abstract escape(s: string): string;
   abstract escapeId(name: string): string;
+  abstract escapeDate(date: Date): string;
 }
 
 export function createConnectionPool(

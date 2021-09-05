@@ -1,4 +1,4 @@
-import { ConnectionInfo, createConnectionPool } from './engine';
+import { ConnectionInfo, createConnectionPool, Dialect } from './engine';
 import { flushDatabase, replaceRecord, FlushOptions } from './flush';
 import { RecordProxy, Record, getModel } from './record';
 import {
@@ -677,7 +677,13 @@ export class Table {
     if (typeof field === 'string') {
       field = this.model.field(field) as SimpleField;
     }
-    return this.db.pool.escape(toRow(value, field) + '');
+    if (/int|float|double|number/i.test(field.column.type)) {
+      return +(value as number) + '';
+    }
+    if (/date|time/i.test(field.column.type)) {
+      return this.db.pool.escapeDate(new Date(value as string));
+    }
+    return this.db.pool.escape(value as string);
   }
 
   _get(connection: Connection, key: Value | Filter): Promise<Document> {
@@ -1503,16 +1509,6 @@ export function _toCamel(value: Value, field: SimpleField): Value {
     return (value + '').trim();
   }
 
-  return value;
-}
-
-export function toRow(value: Value, field: SimpleField): Value {
-  if (value && /date|time/i.test(field.column.type)) {
-    return new Date(value as string)
-      .toISOString()
-      .slice(0, 23) // datetime(3)
-      .replace('T', ' ');
-  }
   return value;
 }
 

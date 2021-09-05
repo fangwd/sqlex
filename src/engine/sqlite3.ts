@@ -75,12 +75,20 @@ export class _ConnectionPool extends ConnectionPool {
   }
 
   escape(value: string): string {
-    return `'${value.replace(/'/g, "''")}'`;
+    return `'${(value+'').replace(/'/g, "''")}'`;
   }
 
   escapeId(name: string) {
     return `"${name}"`;
   }
+
+  escapeDate(date: Date) {
+    return escapeDate(date);
+  }
+}
+
+function escapeDate(date: Date) {
+  return "'" + date.toISOString() + "'";
 }
 
 class _Connection extends Connection {
@@ -151,11 +159,15 @@ class _Connection extends Connection {
   }
 
   escape(value: string): string {
-    return `'${value.replace(/'/g, "''")}'`;
+    return `'${(value+'').replace(/'/g, "''")}'`;
   }
 
   escapeId(name: string) {
     return `"${name}"`;
+  }
+
+  escapeDate(date: Date) {
+    return escapeDate(date);
   }
 }
 

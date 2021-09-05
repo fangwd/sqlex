@@ -28,11 +28,15 @@ export class _ConnectionPool extends ConnectionPool {
   }
 
   escape(value: string): string {
-    return `'${value.replace(/'/g, "''")}'`;
+    return escape(value);
   }
 
   escapeId(name: string) {
-    return `"${name}"`;
+    return escapeId(name);
+  }
+
+  escapeDate(date: Date) {
+    return escapeDate(date);
   }
 }
 
@@ -94,12 +98,28 @@ class _Connection extends Connection {
   }
 
   escape(value: string): string {
-    return `'${value.replace(/'/g, "''")}'`;
+    return escape(value);
   }
 
   escapeId(name: string) {
-    return `"${name}"`;
+    return escapeId(name);
   }
+
+  escapeDate(date: Date) {
+    return escapeDate(date);
+  }
+}
+
+function  escape(value: string): string {
+  return `'${(value+'').replace(/'/g, "''")}'`;
+}
+
+function  escapeId(name: string) {
+  return '"' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+function escapeDate(date: Date) {
+  return `'${date.toISOString()}'::timestamptz`;
 }
 
 function valueOf(obj: any): Value {
