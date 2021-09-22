@@ -13,6 +13,7 @@ type Client = {
 };
 
 export class _ConnectionPool extends ConnectionPool {
+  dialect: Dialect = 'sqlite3';
   options: PoolOptions;
   pool: Array<_Connection>;
   claimed: Array<_Connection>;

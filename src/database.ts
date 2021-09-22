@@ -541,7 +541,7 @@ export class Table {
   ): Promise<Row[]> {
     const builder = new QueryBuilder(this.model, this.db.pool);
 
-    let sql = builder.select(fields, options);
+    let sql = builder.select(fields, {...options, filterThunk});
 
     if (options.limit !== undefined) {
       sql += ` limit ${parseInt(options.limit + '')}`;

@@ -21,6 +21,7 @@ export type TransactionCallback = (
 ) => Promise<any> | void;
 
 export interface DialectEncoder {
+  dialect: Dialect;
   escape: (unsafe: any) => string;
   escapeId: (unsafe: string) => string;
   escapeDate: (date:Date) => string;

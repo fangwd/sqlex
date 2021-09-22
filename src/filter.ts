@@ -158,6 +158,73 @@ export class QueryBuilder {
   }
 
   private or(args: Filter[]): string {
+    const model = this.model;
+    const keys = Object.keys(args[0]);
+    const fields:SimpleField[] = [];
+    let useIn = !keys.some(entry => {
+      const [key, op] = splitKey(entry);
+      if (op && op !== 'eq') {
+        return true;
+      }
+      const field = model.field(key);
+      if (!(field instanceof SimpleField)) {
+        return true;
+      }
+      fields.push(field);
+    });
+    if (useIn) {
+      const keySet = new Set(keys);
+      for (const arg of args) {
+        const keys = Object.keys(arg);
+        if (keys.length !== keySet.size) {
+          useIn = false;
+          break;
+        }
+        for (const key of keys) {
+          const value = arg[key];
+          if (!keySet.has(key) || Array.isArray(value)) {
+            useIn = false;
+            break;
+          }
+          const field = model.field(splitKey(key)[0]) as SimpleField;
+          if (field instanceof ForeignKeyField) {
+            if (value && typeof value === 'object') {
+              const keys = Object.keys(value);
+              if (keys.length !== 1 || keys[0] !== field.referencedField.name) {
+                useIn = false;
+                break;
+              }
+            }
+          }
+        }
+        if (!useIn) {
+          break;
+        }
+      }
+      if (useIn) {
+        const alias = this.prefix(this.alias);
+        const names = fields.map((field) => alias + this.escapeId(field)).join(',');
+        const values = args
+          .map((arg) => {
+            const tuple = keys
+              .map((key, i) => {
+                const field = fields[i];
+                const value = arg[key];
+                const actual =
+                  field instanceof ForeignKeyField && value && typeof value === 'object'
+                    ? value[field.referencedField.name]
+                    : value;
+                return this.escape(field, actual);
+              })
+              .join(',');
+            return fields.length > 1 ? '(' + tuple + ')' : tuple;
+          })
+          .join(',');
+        const prefix = fields.length > 1 && this.dialect.dialect === 'sqlite3' ? 'values ' : '';
+        return `(${names}) in (${prefix}${values})`;
+      }
+    }
+
     const exprs = args.map((arg) => this.and(arg));
     return exprs.length === 0
       ? ''
@@ -703,6 +770,9 @@ export class QueryBuilder {
     }
     if (value && /date|time/i.test(field.column.type)) {
       return this.dialect.escapeDate(new Date(value as string));
+    }
+    if (value === null || value === undefined) {
+      return 'null';
     }
     return this.dialect.escape(value + '');
   }
