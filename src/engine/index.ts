@@ -30,7 +30,7 @@ export interface DialectEncoder {
 export abstract class Connection implements DialectEncoder {
   dialect: Dialect;
   connection: any;
-  name: string;
+  database: string;
   queryCounter: QueryCounter;
 
   abstract query(sql: string, pk?: string): Promise<any>;
@@ -73,7 +73,7 @@ export abstract class Connection implements DialectEncoder {
 
 export abstract class ConnectionPool implements DialectEncoder {
   dialect: Dialect;
-  name: string;
+  database: string;
 
   abstract getConnection(): Promise<Connection>;
   abstract end(): Promise<void>;
@@ -88,9 +88,7 @@ export function createConnectionPool(
   connection: any
 ): ConnectionPool {
   if (dialect === 'mysql') {
-    const result = require('./mysql').default.createConnectionPool(connection);
-    result.name = connection.database;
-    return result;
+    return require('./mysql').default.createConnectionPool(connection);
   }
 
   if (dialect === 'sqlite3') {

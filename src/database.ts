@@ -57,7 +57,7 @@ export class Database {
   constructor(connection: ConnectionPool | ConnectionInfo, schema?: Schema) {
     if (connection instanceof ConnectionPool) {
       this.pool = connection;
-      this.name = this.pool.name;
+      this.name = this.pool.database;
     } else if (connection) {
       this.pool = createConnectionPool(connection.dialect, connection.connection);
       this.name = connection.connection.database || connection.connection.name;

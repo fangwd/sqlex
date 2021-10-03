@@ -8,13 +8,14 @@ class _ConnectionPool extends ConnectionPool {
   constructor(options) {
     super();
     this.pool = mysql.createPool(options);
+    this.database = options.database;
   }
 
   getConnection(): Promise<Connection> {
     return new Promise((resolve, reject) => {
       return this.pool.getConnection((error, connection) => {
         if (error) reject(Error(error.message));
-        resolve(new _Connection(connection, true));
+        resolve(new _Connection(connection, this.database));
       });
     });
   }
@@ -55,12 +56,14 @@ class _Connection extends Connection {
   connection: mysql.Connection | mysql.PoolConnection;
   queryCounter: QueryCounter = new QueryCounter();
 
-  constructor(options, connected?: boolean) {
+  constructor(options, connected?: string) {
     super();
     if (connected) {
       this.connection = options;
+      this.database = connected;
     } else {
       this.connection = mysql.createConnection(options);
+      this.database = options.database;
     }
   }
 

@@ -10,17 +10,18 @@ import {
 import {lower, queryInformationSchema as query } from './util';
 
 export class _ConnectionPool extends ConnectionPool {
-  pool: Pool;
+  protected pool: Pool;
 
   constructor(options: PoolConfig) {
     super();
     this.pool = new Pool(options);
+    this.database = options.database;
   }
 
   async getConnection(): Promise<Connection> {
     return this.pool
       .connect()
-      .then(connection => new _Connection(connection, true));
+      .then(connection => new _Connection(connection, this.database));
   }
 
   end(): Promise<void> {
@@ -40,18 +41,20 @@ export class _ConnectionPool extends ConnectionPool {
   }
 }
 
-class _Connection extends Connection {
+export class _Connection extends Connection {
   dialect: Dialect = 'postgres';
   connection: Client | PoolClient;
   queryCounter: QueryCounter = new QueryCounter();
 
-  constructor(options: ClientConfig | PoolClient, connected?: boolean) {
+  constructor(options: ClientConfig | PoolClient, connected?: string) {
     super();
     if (connected) {
       this.connection = options as PoolClient;
+      this.database = connected;
     } else {
       this.connection = new Client(options as ClientConfig);
       this.connection.connect();
+      this.database = options.database;
     }
   }
 

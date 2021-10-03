@@ -25,6 +25,7 @@ export class _ConnectionPool extends ConnectionPool {
     this.pool = [];
     this.claimed = [];
     this.queue = [];
+    this.database = options.database;
   }
 
   createConnection() {
@@ -99,13 +100,10 @@ class _Connection extends Connection {
   connection: sqlite3.Database;
   queryCounter: QueryCounter = new QueryCounter();
 
-  constructor(options, connected?: boolean) {
+  constructor(options) {
     super();
-    if (connected) {
-      this.connection = options;
-    } else {
-      this.connection = new sqlite3.Database(options.database);
-    }
+    this.connection = new sqlite3.Database(options.database);
+    this.database = options.database;
   }
 
   release(): Promise<void> {
