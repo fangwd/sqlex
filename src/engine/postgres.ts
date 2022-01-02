@@ -8,9 +8,9 @@ import {
   Value,
 } from '../types';
 import {lower, queryInformationSchema as query } from './util';
-
+const { prepareValue } = require('pg/lib/utils');
 export class _ConnectionPool extends ConnectionPool {
-  protected pool: Pool;
+  pool: Pool;
 
   constructor(options: PoolConfig) {
     super();
@@ -122,7 +122,8 @@ function  escapeId(name: string) {
 }
 
 function escapeDate(date: Date) {
-  return `'${date.toISOString()}'::timestamptz`;
+  const ts = prepareValue(date);
+  return `'${ts}'`;
 }
 
 function valueOf(obj: any): Value {
@@ -145,11 +146,13 @@ class SchemaBuilder {
   connection: Connection;
   catalogName: string;
   escapedCatalogName: string;
+  escapedSchemaName: string;
 
-  constructor(connection: Connection, catalogName: string) {
+  constructor(connection: Connection, catalogName: string, schemaName?: string) {
     this.connection = connection;
     this.catalogName = catalogName;
     this.escapedCatalogName = connection.escape(catalogName);
+    this.escapedSchemaName = connection.escape(schemaName || 'public');
   }
 
   get dialet() {
@@ -209,7 +212,7 @@ class SchemaBuilder {
       select table_name, column_name, ordinal_position, column_default,
       is_nullable, data_type, character_maximum_length, udt_name
       from information_schema.columns
-      where table_catalog = ${this.escapedCatalogName} and table_schema = 'public';
+      where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
     `);
     const map = {};
     for (const row of rows) {
@@ -260,7 +263,7 @@ class SchemaBuilder {
    const rows = await query(this.connection, `
       select table_name, constraint_name, constraint_type
       from information_schema.table_constraints
-      where table_catalog = ${this.escapedCatalogName} and table_schema = 'public'
+      where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName}
     `);
     const map = {};
     for (let row of rows) {
@@ -277,7 +280,7 @@ class SchemaBuilder {
       select constraint_name, table_name, column_name,
              position_in_unique_constraint - 1 as position_in_unique_constraint
       from information_schema.key_column_usage
-      where table_catalog = ${this.escapedCatalogName} and table_schema = 'public'
+      where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName}
       order by table_name, constraint_name, ordinal_position;
     `);
     const result: ColumnUsageMap = {};
@@ -310,7 +313,7 @@ class SchemaBuilder {
           join information_schema.table_constraints pk on
               rc.unique_constraint_name = pk.constraint_name and rc.unique_constraint_schema = pk.table_schema
       where
-          fk.table_catalog=${this.escapedCatalogName} and fk.table_schema = 'public';
+          fk.table_catalog=${this.escapedCatalogName} and fk.table_schema = ${this.escapedSchemaName};
     `);
     const result: ForeignKeyMap = {};
     for (const row of rows) {

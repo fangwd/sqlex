@@ -233,7 +233,7 @@ test('flush #3', async done => {
   order2.user = user2;
   user3.status = order2;
 
-  db.flush().then(async connection => {
+  db.flush().then(async ({connection}) => {
     expect(connection.queryCounter.total).toBe(10);
     const user = await db.table('user').get({ email });
     const order = await db.table('order').get({ code });

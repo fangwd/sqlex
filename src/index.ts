@@ -1,3 +1,5 @@
+import { Document } from './types';
+
 export {
   Database,
   Table,
@@ -40,3 +42,7 @@ export { selectTree } from './select';
 export { Record, RecordProxy } from './record';
 export { printSchema, exportSchemaJava, printSchemaTypeScript } from './print';
 export { JsonSerialiser, XstreamSerialiser } from './serialiser';
+export { decodeSurrogateKey, getDefaultSurrogateKeyFields, surrogateKeyToFields } from './loader';
+export { setMockStringPrefix } from './mock';
+
+export type PlainDataObject = Document;

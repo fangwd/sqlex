@@ -16,6 +16,8 @@ const getopt = require('../lib/getopt');
 
 const options = getopt([
   ['  ', '--dialect'],
+  ['-h', '--host'],
+  ['-P', '--port'],
   ['-u', '--user'],
   ['-p', '--password'],
   ['  ', '--json', true],
@@ -31,18 +33,27 @@ const options = getopt([
   ['  ', '--references'],
   ['  ', '--rename'],
   ['  ', '--config'],
-  ['  ', '--fixForeignKeys']
+  ['  ', '--fixForeignKeys'],
+  ['  ', '--zap', true],
 ]);
 
 (async function() {
+  const dialect = options.dialect || 'mysql';
+  const host = options.host || 'localhost';
+  const port = options.port || (options.dialect === 'postgres' ? '5432' : '3306');
+  const user = options.user || 'root';
+  const password = options.password || process.env.DATABASE_PASSWORD;
+  const database = options.argv[0];
   const db = new Database({
-    dialect: options.dialect || 'mysql',
+    dialect,
     connection: {
-      user: options.user,
-      password: options.password,
-      database: options.argv[0],
+      host,
+      port: parseInt(port),
+      user,
+      password,
+      database,
       timezone: 'Z'
-    }
+    },
   });
 
   if (options.config) {
@@ -124,7 +135,10 @@ const options = getopt([
         println(`OK ${row.table_name} ${row.constraint_name}`);
       }
     }
-  } else {
+  } else if (options.zap) {
+    await db.zap();
+  }
+  else {
     print(schema.database, null, 4);
   }
   db.end();

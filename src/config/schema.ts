@@ -1,4 +1,5 @@
 export interface Schema {
+  name?: string;
   tablePrefix?: string;
   models: Model[];
 }

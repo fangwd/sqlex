@@ -9,13 +9,14 @@ import { lower, queryInformationSchema as query } from './util';
 
 export function getInformationSchema(
   connection: Connection,
-  schemaName: string
+  catalogName: string,
+  schemaName?: string
 ): Promise<SchemaInfo> {
   if (connection.dialect === 'postgres') {
     const Builder = require('./postgres').default.SchemaBuilder;
-    return new Builder(connection, schemaName).getResult();
+    return new Builder(connection, catalogName, schemaName).getResult();
   }
-  return new Builder(connection, schemaName).getResult();
+  return new Builder(connection, catalogName).getResult();
 }
 
 class Builder {

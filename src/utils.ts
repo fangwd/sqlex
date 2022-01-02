@@ -80,3 +80,7 @@ export function pluck<T extends { [key: string]: any }>(from: T, keys: (keyof T)
   }
   return result;
 }
+
+export function deepCopy(data: any) {
+  return JSON.parse(JSON.stringify(data));
+}

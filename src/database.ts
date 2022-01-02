@@ -1,4 +1,4 @@
-import { ConnectionInfo, createConnectionPool, Dialect } from './engine';
+import { ConnectionInfo, createConnectionPool } from './engine';
 import { flushDatabase, replaceRecord, FlushOptions } from './flush';
 import { RecordProxy, Record, getModel } from './record';
 import {
@@ -6,7 +6,8 @@ import {
   RecordConfig,
   recordConfigToDocument,
   mapDocument,
-  parseRelatedOption
+  parseRelatedOption,
+  LoadingConfig
 } from './loader';
 import {
   Schema,
@@ -28,7 +29,7 @@ import {
 
 export type Filter = Document | Document[];
 
-import { encodeFilter, QueryBuilder } from './filter';
+import { encodeFilter, FieldMap, QueryBuilder } from './filter';
 import { toArray } from './misc';
 
 import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
@@ -76,7 +77,7 @@ export class Database {
     if (this.schema) return Promise.resolve(this.schema);
     return new Promise((resolve) =>
       this.pool.getConnection().then((connection) =>
-        getInformationSchema(connection, this.name).then((schemaInfo) => {
+        getInformationSchema(connection, this.name, config?.name).then((schemaInfo) => {
           const schema = new Schema(schemaInfo, config);
           this.setSchema(schema);
           connection.release();
@@ -161,9 +162,9 @@ export class Database {
 
   flush(flushOptions?: FlushOptions) {
     return this.pool.getConnection().then((connection) =>
-      flushDatabase(connection, this, flushOptions).then(() => {
+      flushDatabase(connection, this, flushOptions).then((complete) => {
         connection.release();
-        return connection;
+        return { connection, complete };
       })
     );
   }
@@ -176,6 +177,7 @@ export class Database {
     for (const name in this.tableMap) {
       this.tableMap[name].clear();
     }
+    return this;
   }
 
   json() {
@@ -192,11 +194,11 @@ export class Database {
     return result;
   }
 
-  async select(options: DatabaseSelectOptions, connection?: Connection): Promise<Document[]> {
+  async select<T extends Document=Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
     if (typeof options.from === 'string') {
       const table = this.table(options.from);
       if (table) {
-        return table.select(options.fields, pluck(options, SelectOptionKeys));
+        return table.select<T>(options.fields, pluck(options, SelectOptionKeys));
       }
       options = { ...options, from: { table: options.from } };
     }
@@ -223,6 +225,19 @@ export class Database {
 
   async cleanup() {
     await cleanup(this);
+  }
+
+  // Deletes all records from all tables
+  async zap() {
+    const self = this;
+    const { models, fields } = self.schema.sort;
+    for (const key of fields) {
+      await self.table(key.model).update({ [key.name]: null });
+    }
+    for (const model of models) {
+      await self.table(model).delete();
+    }
+    self.clear();
   }
 }
 
@@ -264,6 +279,8 @@ export class Table {
 
   recordList: Record[] = [];
   recordMap: { [key: string]: { [key: string]: Record } };
+  noInsert = false;
+  selectOnly?: Document;
 
   constructor(db: Database, model: Model) {
     this.db = db;
@@ -301,12 +318,12 @@ export class Table {
     );
   }
 
-  async select(
+  async select<T extends Document = Document>(
     fields: string | Document | string[],
     options: SelectOptions = {},
     filterThunk?: (builder: QueryBuilder) => string,
     connection?: Connection
-  ): Promise<Document[]> {
+  ): Promise<T[]> {
     if (connection) {
       const result = await this._select(
         connection,
@@ -317,7 +334,7 @@ export class Table {
       if (!Array.isArray(fields)) {
         await this._resolveRelatedFields(connection, result, fields);
       }
-      return result;
+      return result as T[];
     }
     connection = await this.db.pool.getConnection();
     try {
@@ -331,11 +348,16 @@ export class Table {
         await this._resolveRelatedFields(connection, result, fields);
       }
       connection.release();
-      return result;
+      return result as T[];
     } catch (error) {
       connection.release();
       throw error;
     }
+  }
+
+  async first<T extends Document = Document>(fields: string | Document | string[], filter: Filter = {}) {
+    const rows = await this.select<T>(fields, {where: filter, limit: 1});
+    return rows[0];
   }
 
   async _resolveRelatedFields(
@@ -358,13 +380,18 @@ export class Table {
         let options, fields;
         if (typeof value !== 'object') {
           options = {};
+          fields = '*';
         } else {
           options = Object.assign({}, value);
           // TODO: Document options.fields for related fields!
           if (options.fields) {
             fields = options.fields;
             delete options.fields;
-          } else {
+          } else if (field.referencingField.isUnique()) {
+            options = {};
+            fields = value;
+          }
+          else {
             fields = '*';
           }
         }
@@ -429,27 +456,27 @@ export class Table {
     return result;
   }
 
-  async get(key: Value | Filter): Promise<Document> {
+  async get<T extends Document = Document>(key: Value | Filter): Promise<T> {
     return this._call('_get', key);
   }
 
-  async insert(data: Row): Promise<any> {
+  async insert<T extends Document = Document>(data: Row): Promise<T> {
     return this._call('_insert', data);
   }
 
-  async create(data: Document): Promise<Document> {
+  async create<T extends Document = Document>(data: Document): Promise<T> {
     return this._call('_create', data);
   }
 
-  async update(data: Document, filter: Filter): Promise<any> {
+  async update<T extends Document = Document>(data: T, filter?: Filter): Promise<T> {
     return this._call('_update', data, filter);
   }
 
-  upsert(data: Document, update?: Document): Promise<Document> {
+  upsert<T extends Document = Document>(data: T, update?: Document): Promise<T> {
     return this._call('_upsert', data, update);
   }
 
-  modify(data: Document, filter: Filter): Promise<Document> {
+  modify<T extends Document = Document>(data: T, filter: Filter): Promise<T> {
     return this._call('_modify', data, filter);
   }
 
@@ -469,7 +496,7 @@ export class Table {
     }
   }
 
-  async delete(filter: Filter): Promise<any> {
+  async delete<T extends Document = Document>(filter?: Filter): Promise<T> {
     if (this.closureTable) return this._call('_delete', filter);
 
     const connection = await this.db.pool.getConnection();
@@ -541,6 +568,10 @@ export class Table {
   ): Promise<Row[]> {
     const builder = new QueryBuilder(this.model, this.db.pool);
 
+    if (this.selectOnly) {
+      options = { ...options, where: {...options.where, ...this.selectOnly } };
+    }
+
     let sql = builder.select(fields, {...options, filterThunk});
 
     if (options.limit !== undefined) {
@@ -554,7 +585,7 @@ export class Table {
         if (Array.isArray(fields)) {
           return row;
         }
-        const doc = toDocument(row, this.model, builder.fieldMap);
+        const doc = toDocument(row, this.model, builder.context.fieldMap);
         if (filterThunk) {
           for (const key in row) {
             if (key.indexOf('__') !== -1) {
@@ -636,7 +667,7 @@ export class Table {
       .then(insertId => (typeof insertId === 'number' ? insertId : 0));
   }
 
-  _delete(connection: Connection, filter: Filter): Promise<any> {
+  _delete(connection: Connection, filter?: Filter): Promise<any> {
     const scope = filter ? `${this._where(filter)}` : '';
 
     const __delete = () => {
@@ -677,7 +708,7 @@ export class Table {
     if (typeof field === 'string') {
       field = this.model.field(field) as SimpleField;
     }
-    if (/int|float|double|number/i.test(field.column.type)) {
+    if (/int|float|double|number|numeric|decimal|real/i.test(field.column.type)) {
       return +(value as number) + '';
     }
     if (/date|time/i.test(field.column.type)) {
@@ -1197,6 +1228,7 @@ export class Table {
     if (!existing) {
       this.recordList.push(record);
       this._mapPut(record);
+      record.__connect = this.noInsert;
       return record;
     }
     for (const name in data) {
@@ -1214,6 +1246,12 @@ export class Table {
       }
     }
     return existing;
+  }
+
+  connect(data?: { [key: string]: any } | any[]): Record {
+    const record = this.append(data);
+    record.__connect = true;
+    return record;
   }
 
   clear() {
@@ -1391,15 +1429,27 @@ export class Table {
   }
 
   // It is strongly recommended to call db.clear() before calling this method!
-  xappend(
+  async xappend(
     data: Document | Document[],
-    config: RecordConfig,
-    defaults?: Document
-  ): Promise<any> {
-    return loadTable(this, data, config, defaults);
+    fields: RecordConfig,
+    defaults: Document = {},
+    keys?: string[]
+  ): Promise<string> {
+    const config = new LoadingConfig(this.model, { fields, defaults, keys })
+    const { _id } = await loadTable(this, config, data);
+    return _id;
   }
 
-  xselect(
+  async xselect(
+    fields: RecordConfig,
+    options: SelectOptions = {},
+  ) {
+    const config = new LoadingConfig(this.model, { fields }); 
+    const rows = await this._xselect(config.fields, options);
+    return rows.map(row => config.encodeSurrogateKey(row));
+  }
+
+  _xselect(
     config: RecordConfig,
     options: SelectOptions = {}
   ): Promise<Document[]> {
@@ -1422,8 +1472,9 @@ export class Table {
         );
         const range = docs.map(doc => this.model.keyValue(doc));
         const field = table.model.getForeignKeyOf(this.model);
+        const where = { [field.name]: range };
         return table
-          .select('*', { where: { [field.name]: range } })
+          .select('*', { where })
           .then(rows => {
             const result = [];
             for (const doc of docs) {
@@ -1459,12 +1510,12 @@ export class Table {
     return serialiser.serialise(this.model);
   }
 
-  mock(data:Document) {
-    return mock(this, data);
+  mock(data?: Document, save?: boolean) {
+    return mock(this, data, save);
   }
 
-  mockMany(data:Document[]) {
-    return mock(this, data);
+  mockMany(data:Document[], save?: boolean) {
+    return mock(this, data, save);
   }
 }
 
@@ -1529,10 +1580,12 @@ function setNullForeignKeys(result: Document, model: Model): Document {
   return result;
 }
 
-export function toDocument(row: Row, model: Model, fieldMap = {}): Document {
+export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Document {
   const result = {};
   for (const key in row) {
-    const fieldNames = key.split('__');
+    const mapped = fieldMap ? fieldMap.get(key) : null;
+    const path = mapped && mapped.path || key;
+    const fieldNames = path.split('.');
     let currentResult = result;
     let currentModel = model;
 
@@ -1551,7 +1604,7 @@ export function toDocument(row: Row, model: Model, fieldMap = {}): Document {
 
     const field = currentModel.field(fieldNames[fieldNames.length - 1]);
 
-    const fieldName = fieldMap[key] || field.name;
+    const fieldName = mapped && mapped.alias || field.name;
     if (field instanceof SimpleField) {
       const value = _toCamel(row[key], field);
       if (field instanceof ForeignKeyField) {

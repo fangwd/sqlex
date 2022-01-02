@@ -9,6 +9,7 @@ import {
   DEFAULT_CLOSURE_TABLE_FIELDS
 } from './config';
 import { pluralise, toPascalCase, toCamelCase, lcfirst } from './utils';
+import { sort } from './mock';
 
 export class Schema {
   database: types.Database;
@@ -44,6 +45,10 @@ export class Schema {
       model.resolveRelatedFields();
     }
   }
+
+  get sort()  {
+    return sort(this.models);
+  };
 
   deprefix(name: string): string {
     return this.tablePrefix ? name.replace(this.tablePrefix, '') : name;
@@ -591,4 +596,180 @@ function setFieldName(config: ModelConfig, field: SimpleField, name: string) {
       entry.name = name;
     }
   }
+}
+
+export class LeafModel {
+  constructor(public model: Model, public path: (ForeignKeyField | RelatedField)[]) {}
+}
+
+export function getLeafModel(model: Model, selectors: (string | string[])[]) {
+  let result: LeafModel | undefined;
+
+  const setResult = (base?: LeafModel) => {
+    if (!base) {
+      return;
+    }
+    if (!result) {
+      result = base;
+    } else if (result.model !== base.model) {
+      const field = getBridgeField(result.model, base.model);
+      if (!field) {
+        console.error(model.name, selectors);
+        throw Error(`Bad row construct: ${result.model.name}, ${base.model.name}`);
+      }
+      if (field.model !== result.model) {
+        result = base;
+      }
+    }
+  };
+
+  for (const selector of selectors) {
+    if (selector.indexOf('[') >= 0) {
+      // attrs
+      continue;
+    }
+    if (Array.isArray(selector)) {
+      for (const entry of selector) {
+        setResult(_getLeafModel(model, entry));
+      }
+    } else {
+      setResult(_getLeafModel(model, selector));
+    }
+  }
+
+  return result || new LeafModel(model, []);
+}
+
+function _getLeafModel(model: Model, selector: string): LeafModel | undefined {
+  const names = selector.split('.');
+  const path = [];
+  let length = 0;
+  let result: Model | undefined;
+  let current = model;
+  for (let i = 0; i < names.length; i++) {
+    const field = current.field(names[i]);
+    if (!field) {
+      throw Error(`Not found: ${current.name}::${names[i]} (${model.name}: ${selector})`);
+    }
+    if (field instanceof RelatedField) {
+      path.push(field);
+      if (field.throughField) {
+        current = field.throughField.referencedField.model;
+        //result = field.throughField.model;
+        result = current;
+      } else {
+        current = field.referencingField.model;
+        result = current;
+      }
+      length = path.length;
+    } else if (field instanceof ForeignKeyField) {
+      path.push(field);
+      current = field.referencedField.model;
+    }
+  }
+  path.splice(length);
+  return result ? new LeafModel(result, path) : undefined;
+}
+
+function getBridgeField(left: Model, right: Model) {
+  for (const field of left.fields) {
+    if (field instanceof RelatedField) {
+      if (field.throughField) {
+        if (field.throughField.model === right) {
+          return field.throughField;
+        }
+      } else if (field.referencingField.model === right) {
+        return field.referencingField;
+      }
+    } else if (field instanceof ForeignKeyField) {
+      if (field.referencedField.model === right) {
+        return field;
+      }
+    }
+  }
+}
+
+function rewriteSelector(from: Model, to: LeafModel, selector: string) {
+  const prefix = getRewritePrefix(to);
+  if (prefix.length > 0) {
+    const names = selector.split('.');
+    let model = from;
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      const field = model.field(name);
+      if (field instanceof ForeignKeyField) {
+        model = field.referencedField.model;
+      } else if (field instanceof RelatedField) {
+        if (field.throughField) {
+          if (field.throughField.model === to.model) {
+            names.splice(0, i + 1);
+            names.unshift(field.throughField.name);
+            return names.join('.');
+          }
+        } else if (field.referencingField.model === to.model) {
+          names.splice(0, i + 1);
+          return names.join('.');
+        }
+        model = field.throughField
+          ? field.throughField.referencedField.model
+          : field.referencingField.model;
+      }
+    }
+    return simplifySelector(prefix, from, names);
+  }
+  return selector;
+}
+
+function getRewritePrefix(base: LeafModel): BridgeField[] {
+  const { path } = base;
+  const prefix = [];
+
+  for (let i = path.length - 1; i >= 0; i--) {
+    const field = path[i];
+    if (field instanceof RelatedField) {
+      prefix.push(field.referencingField);
+    } else {
+      prefix.push(field.relatedField);
+    }
+  }
+
+  return prefix;
+}
+
+function simplifySelector(simplified: BridgeField[], model: Model, selector: string[]) {
+  const modelMap = new Map<Model, number>();
+  for (let i = 0; i < simplified.length; i++) {
+    modelMap.set(getBridgedModel(simplified[i]), i);
+  }
+  let current = model;
+  for (let i = 0; i < selector.length - 1; i++) {
+    const field = current.field(selector[i]) as BridgeField;
+    const next = getBridgedModel(field);
+
+    if (modelMap.has(next)) {
+      const index = modelMap.get(next);
+      simplified.splice(index + 1);
+      for (let i = index + 1; i < simplified.length; i++) {
+        modelMap.delete(simplified[i].model);
+      }
+    } else {
+      simplified.push(field);
+      modelMap.set(field.model, simplified.length);
+    }
+    current = next;
+  }
+  const names = simplified.map((f) => f.name);
+  names.push(selector[selector.length - 1]);
+  return names.join('.');
+}
+
+type BridgeField = ForeignKeyField | RelatedField;
+
+function getBridgedModel(field: ForeignKeyField | RelatedField) {
+  if (field instanceof ForeignKeyField) {
+    return field.referencedField.model;
+  }
+  return field.throughField
+    ? field.throughField.referencedField.model
+    : field.referencingField.model;
 }

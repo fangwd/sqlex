@@ -50,6 +50,7 @@ export class Context {
   private counter: number;
 
   aliasMap: { [key: string]: AliasEntry } = {};
+  fieldMap = new FieldMap();
 
   constructor() {
     this.counter = 0;
@@ -101,7 +102,6 @@ export class QueryBuilder {
   skipJoin?: boolean;
   froms?: string[];
 
-  fieldMap = {};
   having?: HavingContext;
 
   getFroms() {
@@ -458,7 +458,7 @@ export class QueryBuilder {
     if (field instanceof SimpleField) {
       const column = `${this.prefix(alias)}${this.escapeId(field)}`;
       if (match) {
-        const name = path.replace(/\./g, '__');
+        const name = this.context.fieldMap.add(path);
         return { column, alias: name };
       } else {
         return { column };
@@ -590,7 +590,7 @@ export class QueryBuilder {
         fields.push({ name, expr });
       });
     } else {
-      const names = getFields(this.model, name, this.fieldMap);
+      const names = getFields(this.model, name, this.context.fieldMap);
       for (const key of names) {
         this._pushField(fields, key);
       }
@@ -940,7 +940,7 @@ function extendByAst(model: Model, filter: Filter, ast: AST) {
   }
 }
 
-function getFields(model: Model, input: string | Document, fieldMap, prefix?: string) {
+function getFields(model: Model, input: string | Document, fieldMap: FieldMap, prefix?: string) {
   let result = [];
 
   const getKey = (name: string) => (prefix ? `${prefix}.${name}` : name);
@@ -974,10 +974,40 @@ function getFields(model: Model, input: string | Document, fieldMap, prefix?: st
           result = result.concat(fields);
         }
       } else if (typeof value === 'string') {
-        fieldMap[key.replace(/\./g, '__')] = value;
+        fieldMap.add(key, value);
       }
     }
   }
 
   return result;
+}
+
+export class FieldMap {
+  map2: {[key: string]: string } = {};
+  map: {[key: string]: {alias?: string, path: string} } = {};
+  count = 0;
+
+  constructor(public prefix = '__f') {
+  }
+
+  add(path: string, alias?: string) {
+    if (path in this.map2) {
+      return this.map2[path];
+    }
+    let name: string;
+    //if ( alias === undefined ) {
+      this.count++;
+      name = this.prefix + this.count;
+   // }
+   // else {
+    //  name = alias;
+    //}
+    this.map[name] = { alias, path };
+    this.map2[path] = name;
+    return name;
+  }
+
+  get(name: string) {
+    return this.map[name];
+  }
 }

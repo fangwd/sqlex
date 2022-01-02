@@ -1,4 +1,5 @@
 import { Database } from '../src/database';
+import { setMockStringPrefix } from '../src/mock';
 import { Schema, SimpleField } from '../src/schema';
 import helper = require('./helper');
 
@@ -8,6 +9,16 @@ beforeAll(() => helper.createDatabase(NAME));
 afterAll(() => helper.dropDatabase(NAME));
 
 describe('mock', () => {
+  test('empty', async () => {
+    const db = helper.connectToDatabase(NAME);
+    updateFieldsNullability(db);
+    const table = db.table('order');
+    const order = await table.mock();
+    expect(order.id).toBeGreaterThan(0);
+    await db.cleanup();
+    db.end();
+  });
+
   test('simple', async () => {
     const db = helper.connectToDatabase(NAME);
     updateFieldsNullability(db);
@@ -122,6 +133,52 @@ describe('cleanup', () => {
   });
 });
 
+describe('string prefix', () => {
+  it('should use provided string prefix', async () => {
+    const db = helper.connectToDatabase(NAME);
+    updateFieldsNullability(db);
+    setMockStringPrefix('string-');
+    const store = await db.table('store').mock();
+    expect(store.name).toMatch(/^string-/);
+    await db.cleanup();
+    db.end();
+  })
+});
+
+describe('connecting mocked to existing', () => {
+  it('should should connect to an existing record', async () => {
+    const db = helper.connectToDatabase(NAME);
+    updateFieldsNullability(db);
+    const user = await db.table('user').create({email: 'fake@mock'});
+    const item = await db.table('order_item').mock({
+      order: {
+        user_id: user.id
+      }
+    });
+    const order = await db.table('order').first('*', {id: item.order.id });
+    expect((order as any).user.id).toBe(user.id);
+    await db.cleanup();
+    {
+      const count = await db.table('order').count({id: item.order.id });
+      expect(count).toBe(0);
+      const row = await db.table('user').first('*', {id: user.id });
+      expect(row.email).toBe(user.email);
+    }
+    const post = await db.table('post').mock({user_id: user.id});
+    expect(post.user.id).toBe(user.id);
+    const saved = await db.table('post').first('*', {id: post.id });
+    expect((saved as any).user.id).toBe(user.id);
+    await db.cleanup();
+    {
+      const count = await db.table('post').count({id: post.id });
+      expect(count).toBe(0);
+      const row = await db.table('user').first('*', {id: user.id });
+      expect(row.email).toBe(user.email);
+    }
+    db.end();
+  })
+});
+
 function updateFieldsNullability(db: Database) {
   (db.schema.model('order').field('code') as SimpleField).column.nullable = false;
   (db.schema.model('order_item').field('product') as SimpleField).column.nullable = false;
@@ -130,4 +187,5 @@ function updateFieldsNullability(db: Database) {
   (db.schema.model('post').field('user') as SimpleField).column.nullable = false;
   (db.schema.model('product_category').field('product') as SimpleField).column.nullable = false;
   (db.schema.model('product_category').field('category') as SimpleField).column.nullable = false;
+  (db.schema.model('store').field('name') as SimpleField).column.nullable = false;
 }

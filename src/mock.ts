@@ -1,9 +1,10 @@
 import { Database, Table } from './database';
 import { DataType, getTypeName } from './print';
-import { ForeignKeyField, getReferencingFields, Model, RelatedField, SimpleField } from './schema';
+import { ForeignKeyField, getReferencingFields, isValue, Model, RelatedField, SimpleField } from './schema';
 import { Document, Value } from './types';
 import { Record } from './record';
 
+export async function mock(table: Table, data: undefined, save?: boolean): Promise<Record>;
 export async function mock(table: Table, data: Document, save?: boolean): Promise<Record>;
 export async function mock(table: Table, data: Document[], save?: boolean): Promise<Record[]>;
 export async function mock(table: Table, data: Document | Document[], save = true) {
@@ -26,9 +27,9 @@ export async function mock(table: Table, data: Document | Document[], save = tru
   return record;
 }
 
-function _mock(table: Table, data: Document): Record {
+function _mock(table: Table, data?: Document): Record {
   const record = table.append({});
-  setFields(record, data);
+  setFields(record, data || {});
   return record;
 }
 
@@ -40,6 +41,18 @@ function setFields(record: Record, data: Document) {
     const value = data[field.name];
     if (field instanceof SimpleField) {
       if (value === undefined) {
+        if (field instanceof ForeignKeyField) {
+          const raw = data[field.column.name];
+          if (raw !== undefined) {
+            const table = db.table(field.referencedField);
+            const parent = table.append({
+              [field.referencedField.name]: raw
+            })
+            parent.__connect = true;
+            record[field.name] = parent;
+            continue;
+          }
+        }
         if (field.column.autoIncrement) {
           continue;
         }
@@ -62,13 +75,25 @@ function setFields(record: Record, data: Document) {
           record[field.name] = value;
         }
       }
-    } else if (Array.isArray(value)) {
+    } else if (value) {
       const related = field as RelatedField;
+      if (isValue(value)) {
+        throw Error(`Bad value for ${field.name}`);
+      }
       if (related.throughField) {
         const table = db.table(related.throughField.referencedField.model);
         const mapping = db.table(related.throughField.model);
-        for (const entry of value) {
-          const actual = _mock(table, (entry as Document) || {});
+        if (Array.isArray(value)) {
+          for (const entry of value) {
+            const actual = _mock(table, (entry as Document) || {});
+            _mock(mapping, {
+              [related.referencingField.name]: record,
+              [related.throughField.name]: actual,
+            });
+          }
+        }
+        else {
+          const actual = _mock(table, (value as Document) || {});
           _mock(mapping, {
             [related.referencingField.name]: record,
             [related.throughField.name]: actual,
@@ -77,8 +102,14 @@ function setFields(record: Record, data: Document) {
       } else {
         const field = related.referencingField;
         const table = db.table(field);
-        for (const entry of value) {
-          const data = { ...((entry as Document) || {}), [field.name]: record };
+        if (Array.isArray(value)) {
+          for (const entry of value) {
+            const data = { ...((entry as Document) || {}), [field.name]: record };
+            _mock(table, data as Document);
+          }
+        }
+        else {
+          const data = { ...((value as Document) || {}), [field.name]: record };
           _mock(table, data as Document);
         }
       }
@@ -90,6 +121,10 @@ function setFields(record: Record, data: Document) {
       throw Error(`Field ${model.name}.${key} does not exist`);
     }
   }
+}
+
+const config = {
+  stringPrefix: ''
 }
 
 const _next = {
@@ -105,13 +140,13 @@ function getValue(type: DataType): Date | number | string | boolean {
     case 'number':
       return _next.number++;
     case 'string':
-      return (_next.string++).toString(16);
+      return config.stringPrefix + (_next.string++).toString(16);
     case 'boolean':
       return _next.boolean++ % 2 == 0;
   }
 }
 
-function sort(models: Model[]) {
+export function sort(models: Model[]) {
   const sorted = new Set<Model>();
   const setNulls = new Set<ForeignKeyField>();
   const refsMap = new Map<Model, ForeignKeyField[]>();
@@ -162,7 +197,9 @@ export async function cleanup(db: Database) {
     const pk = key.model.primaryKey.name();
     const range: Value[] = [];
     for (const record of table.recordList) {
-      range.push(record[pk]);
+      if (!record.__connect) {
+        range.push(record[pk]);
+      }
     }
     if (range.length > 0) {
       await table.update({ [key.name]: null }, { [pk]: range });
@@ -174,11 +211,17 @@ export async function cleanup(db: Database) {
     const pk = model.primaryKey.name();
     const range: Value[] = [];
     for (const record of table.recordList) {
-      range.push(record[pk]);
+      if (!record.__connect) {
+        range.push(record[pk]);
+      }
     }
     if (range.length > 0) {
       await table.delete({ [pk]: range });
     }
   }
   db.clear();
+}
+
+export function setMockStringPrefix(value: string) {
+  config.stringPrefix = value;
 }

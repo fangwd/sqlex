@@ -243,7 +243,8 @@ function _flushTable(
     if (
       record.__dirty() &&
       record.__flushable(perfect) &&
-      !record.__state.selected
+      !record.__state.selected &&
+      (!(record.__connect && record.__state.selected))
     ) {
       const entry = record.__filter();
       if (entry) {
@@ -251,7 +252,7 @@ function _flushTable(
           nameSet.add(name);
         }
         record.__state.dirty.forEach(name => nameSet.add(name));
-        filter.push(entry);
+        filter.push(record);
       }
       recordSet.add(record);
     }
@@ -269,7 +270,7 @@ function _flushTable(
     const fields = model.fields.filter(field => nameSet.has(field.name));
     const columns = fields.map(field => (field as SimpleField).column.name);
     const from = dialect.escapeId(model.table.name);
-    const where = encodeFilter(filter, table.model, dialect);
+    const where = encodeFilter(filter.map(r => r.__filter()), table.model, dialect);
     const query = `select ${columns.join(',')} from ${from} where ${where}`;
     return connection.query(query).then(rows => {
       const map = makeMapTable(table);
@@ -279,6 +280,11 @@ function _flushTable(
         const existing = map._mapGet(record);
         if (existing) {
           record.__updateState(existing);
+        }
+      }
+      for (const record of filter) {
+        if (record.__connect) {
+          record.__state.selected = true;
         }
       }
     });
@@ -443,7 +449,7 @@ function flushDatabaseA(connection: Connection, db: Database): Promise<void> {
   });
 }
 
-export function flushDatabaseB(connection: Connection, db: Database): Promise<void> {
+export function flushDatabaseB(connection: Connection, db: Database, allowPartial: boolean): Promise<boolean> {
   return new Promise((resolve, reject) => {
     let waiting = 0;
     function _flush() {
@@ -453,8 +459,14 @@ export function flushDatabaseB(connection: Connection, db: Database): Promise<vo
           const count = results.reduce((a, b) => a + b, 0);
           if (count === 0 && db.getDirtyCount() > 0) {
             if (waiting++ > db.tableList.length) {
-              dumpDirtyRecords(db);
-              throw Error('Circular references');
+              if (!allowPartial) {
+                dumpDirtyRecords(db);
+                throw Error('Circular references');
+              }
+              else {
+                resolve(false);
+                return;
+              }
             }
           } else {
             waiting = 0;
@@ -462,7 +474,7 @@ export function flushDatabaseB(connection: Connection, db: Database): Promise<vo
           if (db.getDirtyCount() > 0) {
             _flush();
           } else {
-            resolve();
+            resolve(true);
           }
         })
         .catch(error => reject(error));
@@ -475,14 +487,15 @@ export interface FlushOptions {
   afterBegin?: (c: Connection) => Promise<any>;
   beforeCommit?: (c: Connection) => Promise<any>;
   replaceRecordsIn?: string[];
+  allowPartial?: boolean;
 }
 
 export function flushDatabase(
   connection: Connection,
   db: Database,
   options: FlushOptions = {}
-): Promise<void> {
-  let { afterBegin, beforeCommit } = options;
+): Promise<boolean> {
+  let { afterBegin, beforeCommit, allowPartial } = options;
 
   afterBegin = afterBegin || ((c: Connection) => Promise.resolve());
   beforeCommit = beforeCommit || ((c: Connection) => Promise.resolve());
@@ -495,13 +508,13 @@ export function flushDatabase(
           .then(() =>
             (perfect ? flushDatabaseA(connection, db) : Promise.resolve()).then(
               () =>
-                flushDatabaseB(connection, db).then(() => {
+                flushDatabaseB(connection, db, allowPartial).then((complete) => {
                   const replace = options.replaceRecordsIn
                     ? replaceRecordsIn(connection, db, options.replaceRecordsIn)
                     : Promise.resolve();
                   replace.then(() =>
                     beforeCommit(connection).then(() =>
-                      connection.commit().then(() => resolve())
+                      connection.commit().then(() => resolve(complete))
                     )
                   );
                 })
@@ -552,12 +565,6 @@ export function dumpDirtyRecords(db: Database, all: boolean = false) {
 
 function makeMapTable(table: Table) {
   return new Database(table.db.pool, table.db.schema).table(table.model);
-}
-
-function __equal(s1: Set<string>, s2: Set<string>): boolean {
-  if (s1.size !== s2.size) return false;
-  for (const a of s1) if (!s2.has(a)) return false;
-  return true;
 }
 
 /**

@@ -95,6 +95,8 @@ export class Record {
   __state: FlushState;
   __related: { [key: string]: RecordSet };
   __inserted: boolean;
+  __connect: boolean;
+  __path?: string; // for data loading
 
   constructor(table: Table) {
     this.__table = table;
@@ -149,10 +151,27 @@ export class Record {
     return this.__state.dirty.size > 0;
   }
 
+  __disconnect() {
+    const data = this.__data;
+    for (const key of Object.keys(data)) {
+      const value = data[key];
+      if (value instanceof Record) {
+        if (value.__connect && value.__state.selected) {
+          delete data[key];
+          this.__status.dirty.delete(key);
+        }
+      }
+    }
+  }
+
   __flushable(perfect?: number): boolean {
     if (perfect < 0) return true;
 
     if (this.__state.merged) {
+      return false;
+    }
+
+    if (this.__state.selected && this.__connect) {
       return false;
     }
 
