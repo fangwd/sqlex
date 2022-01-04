@@ -395,9 +395,11 @@ export class LoadingConfig {
       this.fields[key] = selector;
       this.surrogateKeys.push(key);
       this.nextSurrogateKeyId++;
+      this.fieldMap.set(selector, this.getField(selector));
     }
     else {
       this.surrogateKeys.push(field.name);
+      this.fields[field.name] = selector;
     }
   }
 
@@ -419,12 +421,14 @@ export class LoadingConfig {
               this.addSurrogateKey(this.model.keyField().name);
             }
             names.push(field.throughField.referencedField.model.keyField().name);
-          } else {
+            this.addSurrogateKey(names)
+            names.pop();
+          } else if (i === path.length - 1) {
             const model = field.referencingField.model;
             names.push(model.keyField().name);
+            this.addSurrogateKey(names)
+            names.pop();
           }
-          this.addSurrogateKey(names)
-          names.pop();
         }
       }
       if (this.surrogateKeys.length === 0) {
