@@ -294,6 +294,10 @@ export class Table {
     return field.column;
   }
 
+  keyColumn(): ColumnInfo {
+    return this.column(this.model.keyField().name);
+  }
+
   getParentField(model?: Model): ForeignKeyField {
     return this.model.getForeignKeyOf(model || this.model);
   }

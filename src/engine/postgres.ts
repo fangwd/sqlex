@@ -206,8 +206,22 @@ class SchemaBuilder {
     return schemaInfo;
   }
 
+  async getTableMap() {
+    const rows = await query(this.connection, `
+      select table_name, table_type
+      from information_schema.tables
+      where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
+    `);
+    const map = {};
+    for (const row of rows) {
+      map[row.table_name] = row.table_type;
+    }
+    return map;
+  }
+
   async getColumns(): Promise<{ [key: string]: ColumnInfo[] }> {
     const enumMap = await this.getEnumMap();
+    const tableMap = await this.getTableMap();
     const rows = await query(this.connection, `
       select table_name, column_name, ordinal_position, column_default,
       is_nullable, data_type, character_maximum_length, udt_name
@@ -216,6 +230,10 @@ class SchemaBuilder {
     `);
     const map = {};
     for (const row of rows) {
+      const tableType = tableMap[row.table_name];
+      if (!tableType || !/BASE TABLE/i.test(tableType)) {
+        continue;
+      }
       map[row.table_name] = map[row.table_name] || [];
       const columnInfo: ColumnInfo = {
         name: row.column_name,
@@ -248,6 +266,7 @@ class SchemaBuilder {
         if (/^nextval\(/i.exec(row.column_default)) {
           columnInfo.autoIncrement = true;
         }
+        columnInfo.default = row.column_default;
       }
       map[row.table_name].push([row.ordinal_position, columnInfo]);
     }
