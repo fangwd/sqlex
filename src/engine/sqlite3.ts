@@ -1,6 +1,7 @@
 import { Connection, QueryCounter, ConnectionPool, Dialect } from '.';
 
 import * as sqlite3 from 'sqlite3';
+import logger from '../logger';
 
 interface PoolOptions {
   connectionLimit: number;
@@ -121,6 +122,7 @@ class _Connection extends Connection {
 
   query(sql: string): Promise<any[] | any> {
     this.queryCounter.total++;
+    logger.debug(sql);
     return new Promise((resolve, reject) => {
       if (/^\s*select\s/i.test(sql)) {
         this.connection.all(sql, function(err, rows) {

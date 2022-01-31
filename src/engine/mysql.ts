@@ -1,6 +1,7 @@
 import { Connection, QueryCounter, ConnectionPool, Dialect } from '.';
 
 import * as mysql from 'mysql';
+import logger from '../logger';
 
 class _ConnectionPool extends ConnectionPool {
   private pool: mysql.Pool;
@@ -76,6 +77,7 @@ class _Connection extends Connection {
 
   query(sql: string): Promise<any[] | void> {
     this.queryCounter.total++;
+    logger.debug(sql);
     return new Promise((resolve, reject) =>
       this.connection.query(sql, (error, results, fields) => {
         if (error) {

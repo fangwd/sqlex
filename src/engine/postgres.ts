@@ -8,6 +8,8 @@ import {
   Value,
 } from '../types';
 import {lower, queryInformationSchema as query } from './util';
+import logger from '../logger';
+
 const { prepareValue } = require('pg/lib/utils');
 export class _ConnectionPool extends ConnectionPool {
   pool: Pool;
@@ -70,6 +72,7 @@ export class _Connection extends Connection {
     if (/^\s*insert\s/i.test(sql) && pk) {
       sql = `${sql} returning ${this.escapeId(pk)}`;
     }
+    logger.debug(sql);
     return this.connection
       .query(sql)
       .then(result => {
