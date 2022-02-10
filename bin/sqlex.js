@@ -34,6 +34,8 @@ const options = getopt([
   ['  ', '--rename'],
   ['  ', '--config'],
   ['  ', '--fixForeignKeys'],
+  ['  ', '--fixNextVal', true],
+  ['  ', '--schema'],
   ['  ', '--zap', true],
 ]);
 
@@ -60,7 +62,7 @@ const options = getopt([
     const config = JSON.parse(fs.readFileSync(options.config).toString());
     await db.buildSchema(config);
   } else {
-    await db.buildSchema();
+    await db.buildSchema({name: options.schema});
   }
 
   const schema = db.schema;
@@ -135,6 +137,21 @@ const options = getopt([
         println(`OK ${row.table_name} ${row.constraint_name}`);
       }
     }
+  } else if (options.fixNextVal) {
+    const conn = await db.pool.getConnection();
+    const schemaName = conn.escapeId(options.schema);
+    for (const table of db.tableList) {
+      const column = table.keyColumn();
+      if (column.autoIncrement) {
+        const tableName = conn.escapeId(table.name);
+        const rows = await conn.query(`select pg_get_serial_sequence('${schemaName}.${tableName}', '${column.name}')`);
+        const seqName = rows[0].pg_get_serial_sequence;
+        const keyName = conn.escapeId(column.name)
+        console.log(`SELECT setval('${seqName}', (SELECT MAX(${keyName}) FROM ${schemaName}.${tableName}));`);
+        await conn.query(`SELECT setval('${seqName}', (SELECT MAX(${keyName}) FROM ${schemaName}.${tableName}))`);
+      }
+    }
+    conn.release();
   } else if (options.zap) {
     await db.zap();
   }

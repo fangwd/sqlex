@@ -461,7 +461,7 @@ export function flushDatabaseB(connection: Connection, db: Database, allowPartia
             if (waiting++ > db.tableList.length) {
               if (!allowPartial) {
                 dumpDirtyRecords(db);
-                throw Error('Circular references');
+                throw Error('Circular references/Incomplete data');
               }
               else {
                 resolve(false);

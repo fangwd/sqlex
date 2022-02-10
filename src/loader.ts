@@ -193,11 +193,17 @@ export async function loadTable(
   const db = table.db;
 
   if (Array.isArray(data)) {
+    const rows = [];
     for (const row of data) {
-      append(table, row, config);
+      rows.push(append(table, row, config));
     }
     const { complete } = await db.flush();
-    return { complete };
+    const _id = [];
+    for (const row of rows) {
+      const key = config.buildSurrogateKey(table, row);
+      _id.push(key);
+    }
+    return { complete, _id };
   }
 
   const row = append(table, data, config);
@@ -398,8 +404,8 @@ export class LoadingConfig {
       this.fieldMap.set(selector, this.getField(selector));
     }
     else {
-      this.surrogateKeys.push(field.name);
-      this.fields[field.name] = selector;
+      this.surrogateKeys.push(selector);
+      this.fields[selector] = selector;
     }
   }
 
@@ -538,19 +544,22 @@ export function decodeSurrogateKey(
   const filter: { [key: string]: Document | Value } = {};
   const rows: Array<{ table: Table; key: { field: string; value: Value } }> = [];
   let model = table.model;
-  for (const { selector, field, value } of decoded) {
-    const keys = selector.split('.');
-    let current = filter;
-    for (let i = 0; i < keys.length - 1; i++) {
-      const key = keys[i];
-      if (!current[key]) {
-        current[key] = {};
+  for (const entry of decoded) {
+    if (entry) {
+      const { selector, field, value } = entry;
+      const keys = selector.split('.');
+      let current = filter;
+      for (let i = 0; i < keys.length - 1; i++) {
+        const key = keys[i];
+        if (!current[key]) {
+          current[key] = {};
+        }
+        current = current[key] as { [key: string]: Document | Value };
       }
-      current = current[key] as { [key: string]: Document | Value };
+      current[field.name] = value;
+      model = field.model;
+      rows.push({ table: table.db.table(model), key: { field: field.name, value } });
     }
-    current[field.name] = value;
-    model = field.model;
-    rows.push({ table: table.db.table(model), key: { field: field.name, value } });
   }
   return { filter, rows };
 }
@@ -589,10 +598,14 @@ export function surrogateKeyToFields(
   const fields: { [key: string]: string } = {};
   const values: { [key: string]: Value } = {};
   let i = 1;
-  for (const { selector, field, value } of decoded) {
-    const key = `__${i++}`;
-    fields[key] = selector;
-    values[key] = value;
+  for (const entry of decoded) {
+    if (entry) {
+      const { selector, field, value }  = entry;
+      const key = `__${i}`;
+      fields[key] = selector;
+      values[key] = value;
+    }
+    i++;
   }
   return { fields, values };
 }

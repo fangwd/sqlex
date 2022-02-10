@@ -1447,8 +1447,9 @@ export class Table {
   async xselect(
     fields: RecordConfig,
     options: SelectOptions = {},
+    keys?: string[]
   ) {
-    const config = new LoadingConfig(this.model, { fields }); 
+    const config = new LoadingConfig(this.model, { fields, keys });
     const rows = await this._xselect(config.fields, options);
     return rows.map(row => config.encodeSurrogateKey(row));
   }
