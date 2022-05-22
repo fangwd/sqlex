@@ -1,6 +1,6 @@
 {
   "name": "sqlex",
-  "version": "2.5.14",
+  "version": "2.6.1",
   "description": "Sqlex - A library that makes database access easy and fun",
   "main": "./dist/index.js",
   "files": [

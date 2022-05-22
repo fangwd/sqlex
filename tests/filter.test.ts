@@ -1,7 +1,8 @@
 import { Schema } from '../src/schema';
-import { encodeFilter, QueryBuilder, splitKey, plainify } from '../src/filter';
+import { encodeFilter, QueryBuilder, plainify } from '../src/filter';
 
 import helper = require('./helper');
+import { DialectEncoder } from '../src/engine';
 
 const NAME = 'filter';
 
@@ -12,12 +13,22 @@ const data = helper.getExampleData();
 const domain = new Schema(data);
 
 test('split name and operator', () => {
-  let [name, op] = splitKey('orders_some');
+  const model = domain.model('OrderItem');
+  const builder = new QueryBuilder(model, DefaultEscape);
+  let [name, op] = builder.splitKey('orders_some');
   expect(name).toBe('orders');
   expect(op).toBe('some');
-  [name, op] = splitKey('orders');
+  [name, op] = builder.splitKey('orders');
   expect(name).toBe('orders');
   expect(op).toBe(undefined);
+});
+
+test('configurable operators map', () => {
+  const model = domain.model('Group');
+  const builder = new QueryBuilder(model, DefaultEscape, {like: 'rlike'});
+  const sql = builder.select('*', { where: { name_like: 'adm%'}});
+  expect(/\blike\b/i.test(sql)).toBe(false);
+  expect(/\brlike\b/i.test(sql)).toBe(true);
 });
 
 /*
@@ -53,6 +64,16 @@ test('example query', done => {
       db.end();
       done();
     });
+});
+
+test('ilike', async ()=> {
+  const db = helper.connectToDatabase(NAME);
+  if (helper.DB_TYPE !== 'postgres') {
+    db.operatorMap['ilike'] = 'like';
+  }
+  const rows = await db.table('group').select('*', {where:  {name_ilike: 'adm%'}});
+  expect(rows.length).toBe(1);
+  db.end();
 });
 
 test('foreign key column filter', () => {
@@ -220,8 +241,8 @@ test('throughField', async () => {
   db.end();
 });
 
-const DefaultEscape = {
-  dialect: '',
+const DefaultEscape : DialectEncoder = {
+  dialect: 'mysql',
   escapeId: s => '`' + s + '`',
   escape: s => "'" + (s + '').replace(/'/g, "\\'") + "'",
   escapeDate: d => "'" + d.toISOString() + "'",

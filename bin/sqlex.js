@@ -34,9 +34,10 @@ const options = getopt([
   ['  ', '--rename'],
   ['  ', '--config'],
   ['  ', '--fixForeignKeys'],
-  ['  ', '--fixNextVal', true],
+  ['  ', '--fixNextVal'],
   ['  ', '--schema'],
   ['  ', '--zap', true],
+  ['  ', '--exclude'],
 ]);
 
 (async function() {
@@ -147,13 +148,18 @@ const options = getopt([
         const rows = await conn.query(`select pg_get_serial_sequence('${schemaName}.${tableName}', '${column.name}')`);
         const seqName = rows[0].pg_get_serial_sequence;
         const keyName = conn.escapeId(column.name)
-        console.log(`SELECT setval('${seqName}', (SELECT MAX(${keyName}) FROM ${schemaName}.${tableName}));`);
-        await conn.query(`SELECT setval('${seqName}', (SELECT MAX(${keyName}) FROM ${schemaName}.${tableName}))`);
+        let nextVal = +options.fixNextVal;
+        if (nextVal <= 0) {
+          nextVal = `(SELECT MAX(${keyName}) FROM ${schemaName}.${tableName})`;
+        }
+        console.log(`SELECT setval('${seqName}', ${nextVal});`);
+        await conn.query(`SELECT setval('${seqName}', ${nextVal})`);
       }
     }
     conn.release();
   } else if (options.zap) {
-    await db.zap();
+    const excludes = (options.exclude || '').split(/[, ]+/)
+    await db.zap(excludes);
   }
   else {
     print(schema.database, null, 4);

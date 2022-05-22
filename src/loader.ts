@@ -460,12 +460,12 @@ export class LoadingConfig {
   encodeSurrogateKey(row: { [key: string]: any }) {
     const values = this.surrogateKeys.map((key) => row[key]);
     this.surrogateKeys.forEach((key) => delete row[key]);
-    row['_id'] = values.join(':');
+    row['_id'] = values.join(';');
     return row;
   }
 
   decodeSurrogateKey(key: string): Array<{selector: string, field: SimpleField, value: string}> {
-    const values = key.split(':');
+    const values = key.split(';');
     return this.surrogateKeys.map((key, index) => {
       const value = values[index];
       if (value) {
@@ -516,7 +516,7 @@ export class LoadingConfig {
       values.push(record[names[names.length - 1]]);
     }
 
-    return values.join(':');
+    return values.join(';');
   }
 }
 

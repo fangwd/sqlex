@@ -32,9 +32,10 @@ export {
   NE,
   IN,
   LIKE,
+  ILIKE,
   NULL,
   SOME,
-  NONE
+  NONE,
 } from './filter';
 
 export { toArray } from './misc';

@@ -91,6 +91,35 @@ type HavingContext = {
   fieldMap: {[key:string]: FieldEntry};
 }
 
+export const AND = 'and';
+export const OR = 'or';
+export const NOT = 'not';
+export const LT = 'lt';
+export const LE = 'le';
+export const GE = 'ge';
+export const GT = 'gt';
+export const NE = 'ne';
+export const IN = 'in';
+export const NOT_IN = 'notIn';
+export const LIKE = 'like';
+export const ILIKE = 'ilike';
+export const NULL = 'null';
+export const SOME = 'some';
+export const NONE = 'none';
+
+export type OperatorMap = { [key:string]: string };
+
+const DEFAULT_OPERATOR_MAP: OperatorMap = {
+  [LT]: '<',
+  [LE]: '<=',
+  [GE]: '>=',
+  [GT]: '>',
+  [NE]: '<>',
+  [IN]: 'in',
+  [NOT_IN]: 'notIn',
+  [LIKE]: 'like',
+  [ILIKE]: 'ilike',
+};
 export class QueryBuilder {
   model: Model;
   field?: Field;
@@ -103,6 +132,7 @@ export class QueryBuilder {
   froms?: string[];
 
   having?: HavingContext;
+  operatorMap: OperatorMap;
 
   getFroms() {
     let builder: QueryBuilder = this;
@@ -113,10 +143,12 @@ export class QueryBuilder {
   }
 
   // (model, dialect), or (parent, field)
-  constructor(model: Model | QueryBuilder, dialect: DialectEncoder | Field) {
+  constructor(model: Model | QueryBuilder, dialect: DialectEncoder | Field,
+      operatorMap?: OperatorMap) {
     if (!(model instanceof QueryBuilder)) {
       this.model = model;
       this.dialect = dialect as DialectEncoder;
+      this.operatorMap = {...DEFAULT_OPERATOR_MAP, ...operatorMap};
       this.context = new Context();
       if (model instanceof TableModel) {
         this.alias = model.table.name;
@@ -133,6 +165,7 @@ export class QueryBuilder {
       this.parent = model;
       this.field = dialect as Field;
       this.dialect = this.parent.dialect;
+      this.operatorMap = this.parent.operatorMap;
       this.context = this.parent.context;
       if (dialect instanceof ForeignKeyField) {
         this.model = dialect.referencedField.model;
@@ -162,7 +195,7 @@ export class QueryBuilder {
     const keys = Object.keys(args[0]);
     const fields:SimpleField[] = [];
     let useIn = !keys.some(entry => {
-      const [key, op] = splitKey(entry);
+      const [key, op] = this.splitKey(entry);
       if (op && op !== 'eq') {
         return true;
       }
@@ -186,7 +219,7 @@ export class QueryBuilder {
             useIn = false;
             break;
           }
-          const field = model.field(splitKey(key)[0]) as SimpleField;
+          const field = model.field(this.splitKey(key)[0]) as SimpleField;
           if (field instanceof ForeignKeyField) {
             if (value && typeof value === 'object') {
               const keys = Object.keys(value);
@@ -240,7 +273,7 @@ export class QueryBuilder {
   private and(args: Filter): string {
     const exprs: string[] = [];
     for (const key in args) {
-      const [name, operator] = splitKey(key);
+      const [name, operator] = this.splitKey(key);
       const field = this.having ? null : this.model.field(name);
       const value = args[key];
       if (field instanceof ForeignKeyField) {
@@ -268,7 +301,7 @@ export class QueryBuilder {
         } else {
           const keys = Object.keys(query);
           if (keys.length === 1) {
-            const [name, operator] = splitKey(keys[0] as string);
+            const [name, operator] = this.splitKey(keys[0] as string);
             if (name === field.referencedField.name) {
               const value = query[keys[0]] as Value;
               if (isValue(value)) {
@@ -783,46 +816,19 @@ export class QueryBuilder {
     }
     return this.dialect.escapeId(name);
   }
+
+  splitKey(arg: string): string[] {
+    const match = /^(.+?)_([^_]+)$/.exec(arg);
+    if (match) {
+      return [match[1], this.operatorMap[match[2]] || match[2]];
+    }
+    return [arg];
+  }
 }
 
 export function encodeFilter(args: Filter, model: Model, escape: DialectEncoder): string {
   const builder = new QueryBuilder(model, escape);
   return builder.where(args);
-}
-
-export const AND = 'and';
-export const OR = 'or';
-export const NOT = 'not';
-export const LT = 'lt';
-export const LE = 'le';
-export const GE = 'ge';
-export const GT = 'gt';
-export const NE = 'ne';
-export const IN = 'in';
-export const NOT_IN = 'notIn';
-export const LIKE = 'like';
-export const NULL = 'null';
-export const SOME = 'some';
-export const NONE = 'none';
-
-const OPERATOR_MAP = {
-  [LT]: '<',
-  [LE]: '<=',
-  [GE]: '>=',
-  [GT]: '>',
-  [NE]: '<>',
-  [IN]: 'in',
-  [NOT_IN]: 'notIn',
-  [LIKE]: 'like',
-};
-
-export function splitKey(arg: string): string[] {
-  const match = /^(.+?)_([^_]+)$/.exec(arg);
-  if (match) {
-    const op = match[2] in OPERATOR_MAP ? OPERATOR_MAP[match[2]] : match[2];
-    return [match[1], op];
-  }
-  return [arg];
 }
 
 export function plainify(value) {

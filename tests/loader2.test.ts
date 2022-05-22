@@ -183,7 +183,7 @@ describe('loading', () => {
     };
 
     const id = await table.xappend(data1, config, { categories: { parent: 1 } });
-    const keys = id.split(':').map(value => +value);
+    const keys = id.split(';').map(value => +value);
     const row = await table.first({ categories: '*' }, { id: keys[0] });
     expect(row.name).toBe('Product 1');
     expect((row.categories as any).length).toBe(1);
@@ -209,7 +209,7 @@ describe('loading', () => {
     };
 
     const id = await table.xappend(data, config, {}, ['id', 'parent.id']);
-    const keys = id.split(':').map((value) => +value);
+    const keys = id.split(';').map((value) => +value);
     const rows = await table.select('*', { where: { id: keys } });
     expect(rows.length).toBe(2);
     const first = rows.find((r) => r.name === 'Example AX1');

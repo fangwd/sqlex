@@ -29,7 +29,7 @@ import {
 
 export type Filter = Document | Document[];
 
-import { encodeFilter, FieldMap, QueryBuilder } from './filter';
+import { encodeFilter, FieldMap, OperatorMap, QueryBuilder } from './filter';
 import { toArray } from './misc';
 
 import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
@@ -51,11 +51,12 @@ export class ClosureTable {
 export class Database {
   name: string;
   schema: Schema;
+  operatorMap: OperatorMap;
   pool: ConnectionPool;
   tableMap: { [key: string]: Table } = {};
   tableList: Table[] = [];
 
-  constructor(connection: ConnectionPool | ConnectionInfo, schema?: Schema) {
+  constructor(connection: ConnectionPool | ConnectionInfo, schema?: Schema, operatorMap?: OperatorMap) {
     if (connection instanceof ConnectionPool) {
       this.pool = connection;
       this.name = this.pool.database;
@@ -64,6 +65,7 @@ export class Database {
       this.name = connection.connection.database || connection.connection.name;
     }
     if (schema) this.setSchema(schema);
+    this.operatorMap = operatorMap || {};
   }
 
   getModels(bulk: boolean = false): { [key: string]: any } {
@@ -203,7 +205,7 @@ export class Database {
       options = { ...options, from: { table: options.from } };
     }
     const view = new ViewModel(this, options.from as ViewOptions);
-    const builder = new QueryBuilder(view, this.pool);
+    const builder = new QueryBuilder(view, this.pool, this.operatorMap);
     let query = builder.select(
       typeof options.fields === 'string' ? [options.fields] : options.fields,
       options,
@@ -228,14 +230,20 @@ export class Database {
   }
 
   // Deletes all records from all tables
-  async zap() {
+  async zap(excludes: string[]=[]) {
     const self = this;
     const { models, fields } = self.schema.sort;
     for (const key of fields) {
-      await self.table(key.model).update({ [key.name]: null });
+      const table = self.table(key.model);
+      if (excludes.indexOf(table.name) < 0) {
+        await self.table(key.model).update({ [key.name]: null });
+      }
     }
     for (const model of models) {
-      await self.table(model).delete();
+      const table = self.table(model);
+      if (excludes.indexOf(table.name) < 0) {
+        await self.table(model).delete();
+      }
     }
     self.clear();
   }
@@ -550,7 +558,13 @@ export class Table {
   }
 
   private _name(): string {
-    return this.db.pool.escapeId(this.model.table.name);
+    const pool = this.db.pool;
+    const schemaName = this.db.schema.config.name;
+    const tableName = this.model.table.name;
+    if (schemaName) {
+      return pool.escapeId(schemaName) + '.' + pool.escapeId(tableName);
+    }
+    return pool.escapeId(tableName);
   }
 
   private _where(filter: Filter) {
@@ -570,7 +584,7 @@ export class Table {
     options: SelectOptions = {},
     filterThunk?: (builder: QueryBuilder) => string
   ): Promise<Row[]> {
-    const builder = new QueryBuilder(this.model, this.db.pool);
+    const builder = new QueryBuilder(this.model, this.db.pool, this.db.operatorMap);
 
     if (this.selectOnly) {
       options = { ...options, where: {...options.where, ...this.selectOnly } };
@@ -590,13 +604,6 @@ export class Table {
           return row;
         }
         const doc = toDocument(row, this.model, builder.context.fieldMap);
-        if (filterThunk) {
-          for (const key in row) {
-            if (key.indexOf('__') !== -1) {
-              doc[key] = row[key];
-            }
-          }
-        }
         return doc;
       });
     });
