@@ -367,8 +367,8 @@ export class Table {
     }
   }
 
-  async first<T extends Document = Document>(fields: string | Document | string[], filter: Filter = {}) {
-    const rows = await this.select<T>(fields, {where: filter, limit: 1});
+  async first<T extends Document = Document>(fields: string | Document | string[], filter: Filter = {}, orderBy?: OrderBy) {
+    const rows = await this.select<T>(fields, {where: filter, limit: 1, orderBy});
     return rows[0];
   }
 

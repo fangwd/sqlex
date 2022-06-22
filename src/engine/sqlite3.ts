@@ -73,8 +73,15 @@ export class _ConnectionPool extends ConnectionPool {
     }
   }
 
-  end(): Promise<void> {
-    return Promise.resolve();
+  async end() {
+    for (const connection of this.pool) {
+      await connection.end();
+    }
+    for (const connection of this.claimed) {
+      await connection.end();
+    }
+    this.pool.length = 0;
+    this.claimed.length = 0;
   }
 
   escape(value: string): string {
@@ -103,7 +110,7 @@ class _Connection extends Connection {
 
   constructor(options) {
     super();
-    this.connection = new sqlite3.Database(options.database);
+    this.connection = new sqlite3.Database(options.database, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
     this.database = options.database;
   }
 
