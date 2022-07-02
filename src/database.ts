@@ -546,7 +546,10 @@ export class Table {
     }
 
     if (filter) {
-      sql += ` where ${this._where(filter)}`;
+      const where = this._where(filter);
+      if (where) {
+        sql += ` where ${where}`;
+      }
     }
 
     return this.db.pool.getConnection().then(connection =>
@@ -1614,7 +1617,11 @@ export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Documen
       currentModel = field.referencedField.model;
     }
 
-    const field = currentModel.field(fieldNames[fieldNames.length - 1]);
+    const lastName = fieldNames[fieldNames.length - 1];
+    const field = currentModel.field(lastName);
+    if (!field) {
+      throw Error(`Field ${currentModel.name}::${lastName} does not exist`);
+    }
 
     const fieldName = mapped && mapped.alias || field.name;
     if (field instanceof SimpleField) {

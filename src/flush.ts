@@ -415,7 +415,7 @@ function mergeRecords(table: Table) {
       const existing = map[uc.name()][value];
       if (existing) {
         if (existing === record) {
-          throw Error(`Duplicate unique constraint: ${uc.name()}`);
+          throw Error(`Duplicate unique constraint: ${uc.name()} (table ${table.name})`);
         }
         if (!record.__state.merged) {
           record.__state.merged = existing;
