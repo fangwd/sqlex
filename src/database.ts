@@ -19,7 +19,7 @@ import {
   isValue,
 } from './schema';
 import { Schema as SchemaConfig } from './config';
-import { Column as ColumnInfo, Document, Value } from './types';
+import { Column as ColumnInfo, Constraint, Document, Value } from './types';
 import {
   Connection,
   ConnectionPool,
@@ -558,6 +558,33 @@ export class Table {
         return parseInt(rows[0].result);
       })
     );
+  }
+
+  async existing(data: Document): Promise<Array<{row: Document, constraint: Constraint}>> {
+    const result: Array<{row: Document, constraint: Constraint}> = [];
+    for (const constraint of this.model.table.constraints) {
+      if (constraint.primaryKey || constraint.unique) {
+        const fields = constraint.columns.map(name => this.model.field(name));
+        const filter = {};
+        let ignore = false;
+        for (const field of fields) {
+          const value = data[field.name];
+          if (value === undefined || value === null) {
+            ignore = true;
+            break;
+          }
+          filter[field.name] = value;
+        }
+        if (ignore) {
+          continue;
+        }
+        const row = await this.get(filter);
+        if (row) {
+          result.push({row, constraint});
+        }
+      }
+    }
+    return result;
   }
 
   private _name(): string {
