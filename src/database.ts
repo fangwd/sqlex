@@ -753,7 +753,14 @@ export class Table {
       return +(value as number) + '';
     }
     if (/date|time/i.test(field.column.type)) {
-      return this.db.pool.escapeDate(new Date(value as string));
+      const str = this.db.pool.escapeDate(new Date(value as string));
+      if (/^date$/i.test(field.column.type)) {
+        return str.replace(/T.+'/, "'");
+      }
+      if (/^time$/i.test(field.column.type)) {
+        return str.replace(/'.+T/, "'");
+      }
+      return str;
     }
     return this.db.pool.escape(value as string);
   }

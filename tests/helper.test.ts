@@ -1,3 +1,4 @@
+import { SimpleField } from '../src/schema';
 import * as helper from './helper';
 
 const NAME = 'helper';
@@ -34,4 +35,20 @@ describe('table.existing', () => {
     expect(existing[0].constraint.columns[0]).toBe('parent_id');
     expect(existing[0].constraint.columns[1]).toBe('name');
   });
+});
+
+test('db.escapeValue', () => {
+  const db = helper.connectToDatabase(NAME);
+
+  const f1 = new SimpleField(null as any, { name: '', type: 'date' }, {});
+  const s1 = db.table('user').escapeValue(f1, '2020-07-06T19:30:00Z');
+  expect(s1).toBe("'2020-07-06'");
+
+  const f2 = new SimpleField(null as any, { name: '', type: 'time' }, {});
+  const s2 = db.table('user').escapeValue(f2, '2020-07-06T19:30:00Z');
+  expect(s2).toBe("'19:30:00.000Z'");
+
+  const f3 = new SimpleField(null as any, { name: '', type: 'datetime' }, {});
+  const s3 = db.table('user').escapeValue(f3, '2020-07-06T19:30:00Z');
+  expect(s3).toBe("'2020-07-06T19:30:00.000Z'");
 });
