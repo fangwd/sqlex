@@ -189,11 +189,11 @@ export class Database {
     }, {});
   }
 
-  async query(sql: string) {
+  async query<T=Document[]>(sql: string) {
     const connection = await this.pool.getConnection();
     const result = await connection.query(sql);
     connection.release();
-    return result;
+    return result as T;
   }
 
   async select<T extends Document=Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
