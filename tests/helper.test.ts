@@ -52,3 +52,36 @@ test('db.escapeValue', () => {
   const s3 = db.table('user').escapeValue(f3, '2020-07-06T19:30:00Z');
   expect(s3).toBe("'2020-07-06T19:30:00.000Z'");
 });
+
+it('should support params with db.query', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const rows = await db.query('select * from %{table:i} where email=%{email}', {
+    table: 'user',
+    email: 'alice@example.com',
+  });
+  expect(rows.length).toBe(1);
+  expect(rows[0].first_name).toBe('Alice');
+  const rows2 = await db.query('select * from %{table:i} where email in (%{email:a})', {
+    table: 'user',
+    email: ['alice@example.com', 'bob@example.com'],
+  });
+  expect(rows2.length).toBe(2);
+});
+
+it('should support params with connection.query', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const conn = await db.pool.getConnection();
+  const rows = await conn.queryf('select * from %{table:i} where email=%{email}', {
+    table: 'user',
+    email: 'alice@example.com',
+  });
+  expect(rows.length).toBe(1);
+  expect(rows[0].first_name).toBe('Alice');
+  const rows2 = await conn.queryf(`select * from %i where email in (%as) order by email`, 'user', [
+    'alice@example.com',
+    'bob@example.com',
+  ]);
+  expect(rows2.length).toBe(2);
+  expect(rows2[1].first_name).toBe('Bob');
+  conn.release();
+});

@@ -36,8 +36,9 @@ import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
 import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
 import { ViewModel, ViewOptions } from './view';
-import { pluck } from './utils';
+import { isPlainObject, pluck } from './utils';
 import { mock, cleanup } from './mock';
+import sprintf from './sprintf';
 
 export class ClosureTable {
   constructor(
@@ -189,8 +190,10 @@ export class Database {
     }, {});
   }
 
-  async query<T=Document[]>(sql: string) {
+  async query<T=Document[]>(fmt: string, ...args) {
     const connection = await this.pool.getConnection();
+    const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
+    const sql = sprintf(fmt, val, this.pool)
     const result = await connection.query(sql);
     connection.release();
     return result as T;

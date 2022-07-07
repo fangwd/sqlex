@@ -1,5 +1,7 @@
 import { getInformationSchema } from './information_schema';
-import { Value } from '../types';
+import { Document, Value } from '../types';
+import sprintf from '../sprintf';
+import { isPlainObject } from '../utils';
 
 export type Dialect = 'mysql' | 'postgres' | 'mssql' | 'oracle' | 'sqlite3';
 
@@ -34,6 +36,12 @@ export abstract class Connection implements DialectEncoder {
   queryCounter: QueryCounter;
 
   abstract query(sql: string, pk?: string): Promise<any>;
+
+  queryf<T=Document[]>(fmt: string, ...args) {
+    const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
+    const sql = sprintf(fmt, val, this);
+    return this.query(sql) as Promise<T>;
+  }
 
   beginTransaction(): Promise<void> {
     return this.query('begin');

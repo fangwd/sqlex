@@ -84,3 +84,7 @@ export function pluck<T extends { [key: string]: any }>(from: T, keys: (keyof T)
 export function deepCopy(data: any) {
   return JSON.parse(JSON.stringify(data));
 }
+
+export function isPlainObject(obj: any): boolean {
+  return Object.prototype.toString.call(obj) === '[object Object]';
+}
