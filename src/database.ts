@@ -758,10 +758,10 @@ export class Table {
     if (/date|time/i.test(field.column.type)) {
       const str = this.db.pool.escapeDate(new Date(value as string));
       if (/^date$/i.test(field.column.type)) {
-        return str.replace(/T.+'/, "'");
+        return str.replace(/[T ].+'/, "'");
       }
       if (/^time$/i.test(field.column.type)) {
-        return str.replace(/'.+T/, "'");
+        return str.replace(/'.+[T ]/, "'");
       }
       return str;
     }
