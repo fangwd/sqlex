@@ -84,7 +84,12 @@ export function tokenise(input: string): Token[] {
             }
           }
         }
-        last = d;
+        if (j === input.length - 1) {
+          i = j;
+        }
+        else {
+          last = d;
+        }
       }
       tokens.push({ type: 'literal', text });
     } else if (/\s/.test(c)) {

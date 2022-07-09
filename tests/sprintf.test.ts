@@ -24,6 +24,10 @@ describe('tokeniser', () => {
   });
 
   it('should handle strings', () => {
+    expect(tokenise(`''`)).toEqual([literal(`''`)]);
+    expect(tokenise(`'\\'`)).toEqual([literal(`'\\'`)]);
+    expect(tokenise(`'1'`)).toEqual([literal(`'1'`)]);
+    expect(tokenise(`'1\\'`)).toEqual([literal(`'1\\'`)]);
     expect(tokenise(`'joe\\'s' 'joe''s' '''' '\\''`)).toEqual([
       literal(`'joe\\'s'`),
       space,
@@ -33,6 +37,19 @@ describe('tokeniser', () => {
       space,
       literal(`'\\''`),
     ]);
+    expect(tokenise(`1'joe'`)).toEqual([literal('1'), literal(`'joe'`)]);
+    expect(tokenise(`1'joe`)).toEqual([literal('1'), literal(`'joe`)]);
+    expect(tokenise(`'joe\\`)).toEqual([literal(`'joe\\`)]);
+    expect(tokenise(`'joe'2`)).toEqual([literal(`'joe'`), literal('2')]);
+    expect(tokenise(`\\'joe\\`)).toEqual([literal('\\'), literal(`'joe\\`)]);
+    expect(tokenise(`\\'joe'2`)).toEqual([literal('\\'), literal(`'joe'`), literal(`2`)]);
+    expect(tokenise(`\\'joe'2'`)).toEqual([
+      literal('\\'),
+      literal(`'joe'`),
+      literal(`2`),
+      literal("'"),
+    ]);
+    expect(tokenise(`1'joe\\'2`)).toEqual([literal('1'), literal(`'joe\\'2`)]);
   });
 
   it('should handle spaces', () => {
