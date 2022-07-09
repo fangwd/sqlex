@@ -3,40 +3,13 @@ import { DialectEncoder } from './engine';
 import { Value } from './types';
 
 type LiteralToken = {
-  kind: 'literal';
+  type: 'literal';
   text: string;
 };
 
-type VariableType =
-  | 'bool'
-  | 'integer'
-  | 'float'
-  | 'string'
-  | 'identifier'
-  | 'reserved'
-  | 'date'
-  | 'time'
-  | 'datetime'
-  | 'value'; // number, string, Date ...
-
-const typeMap: { [key: string]: VariableType } = {
-  b: 'bool',
-  d: 'integer',
-  f: 'float',
-  s: 'string',
-  i: 'identifier',
-  r: 'reserved',
-  D: 'date',
-  t: 'time',
-  T: 'datetime',
-  '?': 'value',
-};
-
 type VariableToken = {
-  kind: 'variable';
-  key?: string;
-  type: VariableType;
-  array?: boolean;
+  type: 'variable';
+  name?: string;
 };
 
 type Token = LiteralToken | VariableToken;
@@ -48,103 +21,98 @@ export function tokenise(input: string): Token[] {
     return tokenised[input];
   }
 
-  const result: Token[] = [];
+  const tokens: Token[] = [];
 
-  let token: LiteralToken | undefined;
   for (let i = 0; i < input.length; i++) {
     const c = input[i];
-
-    if (c !== '%') {
-      if (token === undefined) {
-        token = { kind: 'literal', text: c };
+    if (c === '\\') {
+      // '\?' -> '?', '\:' -> ':'
+      const d = input[i + 1];
+      if (d === '?' || d === ':') {
+        tokens.push({ type: 'literal', text: d });
+        i++;
       } else {
-        token.text += c;
+        let text = c;
+        for (let j = i + 1; ; j++) {
+          const e = input[j];
+          if (/[\s'"`?:]/.test(e) || j === input.length) {
+            i = j - 1;
+            break;
+          } else {
+            text += e;
+          }
+        }
+        tokens.push({ type: 'literal', text });
       }
-      continue;
-    }
-
-    if (token) {
-      result.push(token);
-      token = undefined;
-    }
-
-    if (i === input.length - 1) {
-      result.push({ kind: 'literal', text: '%' });
-      continue;
-    }
-
-    let next = input[++i];
-    if (next === '%') {
-      result.push({ kind: 'literal', text: '%' });
-    } else if (next === '{') {
-      const data = ['', ''];
-      let index = 0;
-      for (let j = i + 1; j < input.length; j++) {
-        const char = input[j];
-        if (char === '}') {
-          i = j;
+    } else if (c === '?') {
+      tokens.push({ type: 'variable' });
+    } else if (c === ':') {
+      let name = '';
+      for (let j = i + 1; ; j++) {
+        if (j === input.length) {
+          i = j - 1;
           break;
         }
-        if (char === ':') {
-          if (index > 0) {
-            throw Error(`Invalid format: ${input.substring(i, j + 1)}`);
-          }
-          index = 1;
+        const d = input[j];
+        if (/\w/.test(d)) {
+          name += d;
         } else {
-          data[index] += char;
+          i = j - 1;
+          break;
         }
       }
-      if (input[i] !== '}') {
-        throw Error(`Invalid format: ${input.substring(i)}`);
+      if (name.length === 0) {
+        throw Error(`Missing name (near '${input.substring(i, 10)}')`);
       }
-      const key = data[0];
-      let type: VariableType = 'value';
-      let array: boolean | undefined;
-      if (data[1][0] === 'a') {
-        array = true;
-        data[1] = data[1].substring(1);
+      tokens.push({ type: 'variable', name });
+    } else if (c === "'" || c === '"' || c === '`') {
+      // 'joe\'s' 'joe''s' 'joes'
+      let text = c;
+      let last = c;
+      for (let j = i + 1; j < input.length; j++) {
+        const d = input[j];
+        text += d;
+        if (d === c) {
+          if (last !== '\\') {
+            const e = input[j + 1];
+            if (e === c) {
+              text += e;
+              j++;
+            } else {
+              i = j;
+              break;
+            }
+          }
+        }
+        last = d;
       }
-      if (data[1]) {
-        type = parseVariableType(data[1]);
+      tokens.push({ type: 'literal', text });
+    } else if (/\s/.test(c)) {
+      tokens.push({ type: 'literal', text: ' ' });
+      for (let j = i + 1; ; j++) {
+        if (!/\s/.test(input[j]) || j === input.length) {
+          i = j - 1;
+          break;
+        }
       }
-      result.push({ kind: 'variable', key, type, array });
     } else {
-      let array: boolean | undefined;
-      let type: VariableType;
-
-      if (next === 'a') {
-        array = true;
-        next = input[++i];
-        if (!(next in typeMap)) {
-          if (next && /[a-zA-Z]/.test(next)) {
-            throw Error(`Unknown flag: ${next}`);
-          }
-          type = 'value';
-          i--;
+      let text = c;
+      for (let j = i + 1; ; j++) {
+        const d = input[j];
+        if (/[\s\\'"`?:]/.test(d) || j === input.length) {
+          i = j - 1;
+          break;
         } else {
-          type = typeMap[next];
+          text += d;
         }
-      } else {
-        type = parseVariableType(next);
       }
-      result.push({ kind: 'variable', type, array });
+      tokens.push({ type: 'literal', text });
     }
   }
 
-  if (token) {
-    result.push(token);
-  }
+  tokenised[input] = tokens;
 
-  tokenised[input] = result;
-
-  return result;
-}
-
-function parseVariableType(key: string) {
-  if (!(key in typeMap)) {
-    throw Error(`Unknown flag: ${key}`);
-  }
-  return typeMap[key];
+  return tokens;
 }
 
 const defaultEncoder: DialectEncoder = {
@@ -154,9 +122,11 @@ const defaultEncoder: DialectEncoder = {
   escapeDate: (d) => "'" + d.toISOString() + "'",
 };
 
+export type ArgType = Value | (Value | Value[])[] | { [key: string]: Value | Value[] };
+
 export default function sprintf(
   fmt: string,
-  args?: Value[] | Value[][] | { [key: string]: Value | Value[] },
+  args?: ArgType,
   encoder = defaultEncoder
 ) {
   if (!args || (Array.isArray(args) && args.length === 0) || Object.keys(args).length === 0) {
@@ -169,57 +139,31 @@ export default function sprintf(
   let next = 0;
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (token.kind === 'literal') {
+    if (token.type === 'literal') {
       result.push(token.text);
     } else {
-      const value: Value = token.key ? args[token.key] : args[next++];
+      const key = token.name ? token.name : next++;
+      const value: Value = args[key];
       if (value === undefined) {
-        throw Error(`Too few arguments for '${fmt}'`);
+        throw Error(`Missing argument ${key}`);
       }
-      if (token.array) {
-        if (!Array.isArray(value)) {
-          throw Error(`Not an array: ${value}`);
-        }
-        result.push(value.map((val) => toString(token.type, val, encoder)).join(','));
-      } else {
-        result.push(toString(token.type, value, encoder));
-      }
+      result.push(toString(value, encoder));
     }
   }
   return result.join('');
 }
 
-function toString(type: VariableType, value: Value, encoder: DialectEncoder) {
-  switch (type) {
-    case 'bool':
-      return value ? 'true' : 'false';
-    case 'integer':
-      return String(parseInt(value as string));
-    case 'float':
-      return String(parseFloat(value as string));
-    case 'string':
-      return encoder.escape(value);
-    case 'identifier':
-      return encoder.escapeId(String(value));
-    case 'reserved':
-      return String(value);
-    case 'date':
-      return encoder.escapeDate(new Date(value as string)).replace(/[ T].+'/, "'");
-    case 'time':
-      return encoder.escapeDate(new Date(value as string)).replace(/'.+[ T]/, "'");
-    case 'datetime':
-      return encoder.escapeDate(new Date(value as string));
-    case 'value':
-      if (isDate(value)) {
-        return encoder.escapeDate(value);
-      } else if (value === undefined || value === null) {
-        return 'null';
-      } else if (typeof value === 'string') {
-        return encoder.escape(value);
-      } else {
-        return String(value);
-      }
-    default:
-      throw Error(`Unknown format: ${type}`);
+function toString(value: Value, encoder: DialectEncoder) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => toString(entry, encoder)).join(', ');
+  }
+  if (isDate(value)) {
+    return encoder.escapeDate(value);
+  } else if (value === undefined || value === null) {
+    return 'null';
+  } else if (typeof value === 'string') {
+    return encoder.escape(value);
+  } else {
+    return String(value);
   }
 }

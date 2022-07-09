@@ -55,14 +55,12 @@ test('db.escapeValue', () => {
 
 it('should support params with db.query', async () => {
   const db = helper.connectToDatabase(NAME);
-  const rows = await db.query('select * from %{table:i} where email=%{email}', {
-    table: 'user',
+  const rows = await db.query('select * from user where email=:email', {
     email: 'alice@example.com',
   });
   expect(rows.length).toBe(1);
   expect(rows[0].first_name).toBe('Alice');
-  const rows2 = await db.query('select * from %{table:i} where email in (%{email:a})', {
-    table: 'user',
+  const rows2 = await db.query('select * from user where email in (:email)', {
     email: ['alice@example.com', 'bob@example.com'],
   });
   expect(rows2.length).toBe(2);
@@ -71,13 +69,12 @@ it('should support params with db.query', async () => {
 it('should support params with connection.query', async () => {
   const db = helper.connectToDatabase(NAME);
   const conn = await db.pool.getConnection();
-  const rows = await conn.queryf('select * from %{table:i} where email=%{email}', {
-    table: 'user',
+  const rows = await conn.queryf('select * from user where email=:email', {
     email: 'alice@example.com',
   });
   expect(rows.length).toBe(1);
   expect(rows[0].first_name).toBe('Alice');
-  const rows2 = await conn.queryf(`select * from %i where email in (%as) order by email`, 'user', [
+  const rows2 = await conn.queryf(`select * from user where email in (?) order by email`, [
     'alice@example.com',
     'bob@example.com',
   ]);

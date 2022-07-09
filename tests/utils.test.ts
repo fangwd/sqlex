@@ -4,7 +4,10 @@ import {
   setPluralForms,
   toCamelCase,
   toPascalCase,
-  config
+  config,
+  datetimeToString,
+  dateToString,
+  timeToString
 } from '../src/utils';
 
 test('pluralise', () => {
@@ -38,4 +41,15 @@ test('pluralise - java', () => {
 test('camel/pascal cases', () => {
   expect(toCamelCase('special_equipment')).toBe('specialEquipment');
   expect(toPascalCase('special_equipment')).toBe('SpecialEquipment');
+});
+
+test('date/time to strings', () => {
+  if (Intl.DateTimeFormat().resolvedOptions().timeZone === 'Australia/Adelaide') {
+    const d = new Date('2022-07-09T02:17:09.175Z');
+    expect(datetimeToString(d)).toBe('2022-07-09T11:47:09.175+09:30');
+    expect(datetimeToString(d, true)).toBe('2022-07-09T02:17:09.175+00:00');
+    expect(dateToString(d)).toBe('2022-07-09');
+    expect(timeToString(d)).toBe('11:47:09.175+09:30');
+    expect(timeToString(d, true)).toBe('02:17:09.175+00:00');
+  }
 });

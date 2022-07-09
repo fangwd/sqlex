@@ -9,8 +9,8 @@ import {
 } from '../types';
 import {lower, queryInformationSchema as query } from './util';
 import logger from '../logger';
+import { datetimeToString } from '../utils';
 
-const { prepareValue } = require('pg/lib/utils');
 export class _ConnectionPool extends ConnectionPool {
   pool: Pool;
 
@@ -125,7 +125,7 @@ function  escapeId(name: string) {
 }
 
 function escapeDate(date: Date) {
-  const ts = prepareValue(date);
+  const ts = datetimeToString(date);
   return `'${ts}'`;
 }
 

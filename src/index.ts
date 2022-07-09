@@ -46,4 +46,7 @@ export { JsonSerialiser, XstreamSerialiser } from './serialiser';
 export { decodeSurrogateKey, getDefaultSurrogateKeyFields, surrogateKeyToFields } from './loader';
 export { setMockStringPrefix } from './mock';
 
+export { datetimeToString, dateToString, timeToString, isPlainObject, pluralise, pluck } from './utils';
+export { Schema, Model } from './schema';
+
 export type PlainDataObject = Document;

@@ -88,3 +88,33 @@ export function deepCopy(data: any) {
 export function isPlainObject(obj: any): boolean {
   return Object.prototype.toString.call(obj) === '[object Object]';
 }
+
+export function padStart(number: number, targetLength: number, padString = '0') {
+  return String(number).padStart(targetLength, padString);
+}
+
+export function datetimeToString(d: Date | string, utc = false) {
+  if (!(d instanceof Date)) {
+    d = new Date(d);
+  }
+  let sign = '+';
+  let offset = '00:00';
+  if (!utc) {
+    let n = -d.getTimezoneOffset();
+    d = new Date(d.getTime() + n * 60000);
+    if (n < 0) {
+      n *= -1;
+      sign = '-';
+    }
+    offset = padStart(Math.floor(n / 60), 2) + ':' + padStart(n % 60, 2);
+  }
+  return d.toISOString().replace(/Z$/, sign + offset);
+}
+
+export function dateToString(value: string | Date, utc=false) {
+  return datetimeToString(value, utc).split('T')[0];
+}
+
+export function timeToString(value: string | Date, utc=false) {
+  return datetimeToString(value, utc).split('T')[1];
+}
