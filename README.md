@@ -1,4 +1,6 @@
-*sqlex* is a library to help retrieve, update, import and export data from a relational database easily. Apart from standard database relations like one-to-one, many-to-one and many-to-many, it also has built-in support for hierarchical data (trees) using closure tables, including cloning a tree rooted at a specific object.
+*sqlex* is a library to help retrieve, update, import and export data from a relational database easily. Apart from standard database relations like one-to-one, many-to-one and many-to-many, it also has built-in support for hierarchical data (trees) using closure tables, including cloning a tree rooted at a specific object. When running
+raw SQL queries, placeholders can be used for both positional (`?`) and named (e.g `:id`) parameters, and parameter
+values can be either simple Javascript values or arrays.
 
 Supported databases: MySQL, Postgres, SQLite
 
@@ -279,6 +281,30 @@ const docs = await db.table('category').xselect(config);
 ```
 
 More examples can be found in the `test` folder.
+
+## Making raw SQL queries with placeholders
+
+A database object has a `query` method for raw SQL queries. Positional parameters to the
+query can be provided using placeholder `?`:
+
+```js
+await db.query("select * from user where email = ? and status = ?", email, status);
+```
+
+Sqlex also supports named parameters when parameter values are stored in an object:
+
+```js
+db.query("select * from user where email = :email and status = :status", users);
+```
+
+Parameter values can be simple Javascript values or arrays:
+
+```js
+db.query("update user set status = 0 where id in (?)", [1, 2, 3]);
+
+// or:
+db.query("update user set status = 0 where id in (:id)", {id: [1, 2, 3]});
+```
 
 ## Command line interface
 
