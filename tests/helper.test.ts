@@ -14,6 +14,7 @@ describe('table.existing', () => {
     expect(existing.length).toBe(1);
     expect(existing[0].row.id).toBe(user.id);
     expect(existing[0].constraint.columns[0]).toBe('email');
+    await db.end();
   });
 
   it('should ignore null values', async () => {
@@ -21,6 +22,7 @@ describe('table.existing', () => {
     await db.table('category').create({ name: 'foo' });
     const existing = await db.table('category').existing({ name: 'foo', parent: null });
     expect(existing.length).toBe(0);
+    await db.end();
   });
 
   it('should report duplicates including foreign keys', async () => {
@@ -34,11 +36,17 @@ describe('table.existing', () => {
     expect(existing[0].row.id).toBe(row2.id);
     expect(existing[0].constraint.columns[0]).toBe('parent_id');
     expect(existing[0].constraint.columns[1]).toBe('name');
+    await db.end();
   });
 });
 
-test('db.escapeValue', () => {
+test('db.escapeValue', async () => {
   const db = helper.connectToDatabase(NAME);
+
+  if (process.env.DB_TYPE === 'postgres') {
+    // pg's built-in encoder uses local timezone to encode datetimes
+    return;
+  }
 
   const f1 = new SimpleField(null as any, { name: '', type: 'date' }, {});
   const s1 = db.table('user').escapeValue(f1, '2020-07-06T19:30:00Z');
@@ -46,11 +54,13 @@ test('db.escapeValue', () => {
 
   const f2 = new SimpleField(null as any, { name: '', type: 'time' }, {});
   const s2 = db.table('user').escapeValue(f2, '2020-07-06T19:30:00Z');
-  expect(s2).toBe("'19:30:00.000Z'");
+  expect(s2.replace(/Z/, '')).toBe("'19:30:00.000'");
 
   const f3 = new SimpleField(null as any, { name: '', type: 'datetime' }, {});
   const s3 = db.table('user').escapeValue(f3, '2020-07-06T19:30:00Z');
-  expect(s3).toBe("'2020-07-06T19:30:00.000Z'");
+  expect(s3.replace(/Z/, '').replace(/T/, ' ')).toBe("'2020-07-06 19:30:00.000'");
+
+  await db.end();
 });
 
 it('should support params with db.query', async () => {
@@ -64,6 +74,7 @@ it('should support params with db.query', async () => {
     email: ['alice@example.com', 'bob@example.com'],
   });
   expect(rows2.length).toBe(2);
+  await db.end();
 });
 
 it('should support params with connection.query', async () => {
@@ -81,4 +92,5 @@ it('should support params with connection.query', async () => {
   expect(rows2.length).toBe(2);
   expect(rows2[1].first_name).toBe('Bob');
   conn.release();
+  await db.end();
 });
