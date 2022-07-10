@@ -367,3 +367,11 @@ describe('having', () => {
     db.end();
   });
 });
+
+test('through field', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const rows = await db.table('order_item').select('*', {
+    where: { product: { categories_exists: { name_like: '%Apple' } } },
+  });
+  expect(rows.length).toBe(3);
+});

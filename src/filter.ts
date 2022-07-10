@@ -314,7 +314,7 @@ export class QueryBuilder {
               const referencingField = relatedField.referencingField;
               const builder = new QueryBuilder(referencingField.model, this.dialect);
               let where = query[keys[0]] as Filter;
-              if (relatedField.throughField && relatedField.name === keys[0]) {
+              if (relatedField.throughField && relatedField.name === name) {
                 where = {
                   [relatedField.throughField.name]: where,
                 };
