@@ -127,7 +127,7 @@ class _Connection extends Connection {
     );
   }
 
-  query(sql: string): Promise<any[] | any> {
+  _query(sql: string): Promise<any[] | any> {
     this.queryCounter.total++;
     logger.debug(sql);
     return new Promise((resolve, reject) => {

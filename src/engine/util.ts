@@ -9,5 +9,5 @@ export function lower(row: { [key: string]: any }) {
 }
 
 export function queryInformationSchema(connection: Connection, query: string) {
-  return connection.query(query).then(rows => rows.map(row => lower(row)));
+  return connection._query(query).then(rows => rows.map(row => lower(row)));
 }

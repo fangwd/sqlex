@@ -35,24 +35,24 @@ export abstract class Connection implements DialectEncoder {
   database: string;
   queryCounter: QueryCounter;
 
-  abstract query(sql: string, pk?: string): Promise<any>;
+  abstract _query(sql: string, pk?: string): Promise<any>;
 
-  queryf<T=Document[]>(fmt: string, ...args) {
+  query<T=Document[]>(fmt: string, ...args) {
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
     const sql = sprintf(fmt, val, this);
-    return this.query(sql) as Promise<T>;
+    return this._query(sql) as Promise<T>;
   }
 
   beginTransaction(): Promise<void> {
-    return this.query('begin');
+    return this._query('begin');
   }
 
   commit(): Promise<void> {
-    return this.query('commit');
+    return this._query('commit');
   }
 
   rollback(): Promise<void> {
-    return this.query('rollback');
+    return this._query('rollback');
   }
 
   abstract end(): Promise<void>;

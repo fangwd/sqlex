@@ -37,7 +37,7 @@ export function createNode(
     `from ${closureTable} where ${descendant} ${where} ` +
     `union all select ${keyValue}, ${keyValue}${depth_0}`;
 
-  return connection.query(sql);
+  return connection._query(sql);
 }
 
 export function moveSubtree(
@@ -85,8 +85,8 @@ where t1.${descendant} = ${parentId} and t2.${ancestor} = ${pk}
 `;
 
   return connection
-    .query(deleteQuery)
-    .then(() => connection.query(insertQuery));
+    ._query(deleteQuery)
+    .then(() => connection._query(insertQuery));
 }
 
 export function deleteSubtree(
@@ -118,7 +118,7 @@ delete from ${closureTable} where ${descendant} in
   (select * from (select ${descendant} from ${closureTable}${where}) as t)
 `;
 
-  return connection.query(query);
+  return connection._query(query);
 }
 
 export function treeQuery(
@@ -152,6 +152,6 @@ export function treeQuery(
   }
 
   return connection
-    .query(sql)
+    ._query(sql)
     .then(rows => rows.map(row => toDocument(row, table.model)));
 }

@@ -194,7 +194,7 @@ export class Database {
     const connection = await this.pool.getConnection();
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
     const sql = sprintf(fmt, val, this.pool)
-    const result = await connection.query(sql);
+    const result = await connection._query(sql);
     connection.release();
     return result as T;
   }
@@ -221,11 +221,11 @@ export class Database {
     }
     if (!connection) {
       connection = await this.pool.getConnection();
-      const result = connection.query(query);
+      const result = connection._query(query);
       connection.release();
       return result;
     }
-    return connection.query(query);
+    return connection._query(query);
   }
 
   async cleanup() {
@@ -556,7 +556,7 @@ export class Table {
     }
 
     return this.db.pool.getConnection().then(connection =>
-      connection.query(sql).then(rows => {
+      connection._query(sql).then(rows => {
         connection.release();
         return parseInt(rows[0].result);
       })
@@ -631,7 +631,7 @@ export class Table {
     if (options.offset !== undefined) {
       sql += ` offset ${parseInt(options.offset + '')}`;
     }
-    return connection.query(sql).then(rows => {
+    return connection._query(sql).then(rows => {
       return rows.map(row => {
         if (Array.isArray(fields)) {
           return row;
@@ -697,7 +697,7 @@ export class Table {
       }
     }
 
-    return connection.query(sql);
+    return connection._query(sql);
   }
 
   _insert(connection: Connection, data: Row): Promise<any> {
@@ -707,7 +707,7 @@ export class Table {
     const value = keys.map(key => this.escapeValue(key, data[key])).join(', ');
     const sql = `insert into ${this._name()} (${name}) values (${value})`;
     return connection
-      .query(sql, this.model.keyField().column.name)
+      ._query(sql, this.model.keyField().column.name)
       .then(insertId => (typeof insertId === 'number' ? insertId : 0));
   }
 
@@ -719,7 +719,7 @@ export class Table {
       if (scope) {
         sql += ` where ${scope}`;
       }
-      return connection.query(sql);
+      return connection._query(sql);
     };
 
     if (this.closureTable) {

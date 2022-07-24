@@ -67,7 +67,7 @@ export class _Connection extends Connection {
     }
   }
 
-  async query(sql: string, pk?: string): Promise<any[] | any> {
+  async _query(sql: string, pk?: string): Promise<any[] | any> {
     this.queryCounter.total++;
     if (/^\s*insert\s/i.test(sql) && pk) {
       sql = `${sql} returning ${this.escapeId(pk)}`;

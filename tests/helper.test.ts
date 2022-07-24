@@ -80,12 +80,12 @@ it('should support params with db.query', async () => {
 it('should support params with connection.query', async () => {
   const db = helper.connectToDatabase(NAME);
   const conn = await db.pool.getConnection();
-  const rows = await conn.queryf('select * from user where email=:email', {
+  const rows = await conn.query('select * from user where email=:email', {
     email: 'alice@example.com',
   });
   expect(rows.length).toBe(1);
   expect(rows[0].first_name).toBe('Alice');
-  const rows2 = await conn.queryf(`select * from user where email in (?) order by email`, [
+  const rows2 = await conn.query(`select * from user where email in (?) order by email`, [
     'alice@example.com',
     'bob@example.com',
   ]);

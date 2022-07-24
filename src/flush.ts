@@ -143,7 +143,7 @@ function _persist(connection: Connection, record: Record): Promise<Record> {
 
   return new Promise((resolve, reject) => {
     async function _insert() {
-      await connection.query('SAVEPOINT sp');
+      await connection._query('SAVEPOINT sp');
       record.__table
         ._insert(connection, fields)
         .then(async id => {
@@ -153,13 +153,13 @@ function _persist(connection: Connection, record: Record): Promise<Record> {
           record.__remove_dirty(Object.keys(fields));
           record.__state.method = FlushMethod.UPDATE;
           record.__inserted = true;
-          await connection.query('RELEASE SAVEPOINT sp');
+          await connection._query('RELEASE SAVEPOINT sp');
           resolve(record);
         })
         .catch(async error => {
           if (!isIntegrityError(error)) return reject(error);
 
-          await connection.query('ROLLBACK TO SAVEPOINT sp');
+          await connection._query('ROLLBACK TO SAVEPOINT sp');
 
           if (Object.keys(fields).length === 1) {
             const name = Object.keys(fields)[0];
@@ -272,7 +272,7 @@ function _flushTable(
     const from = dialect.escapeId(model.table.name);
     const where = encodeFilter(filter.map(r => r.__filter()), table.model, dialect);
     const query = `select ${columns.join(',')} from ${from} where ${where}`;
-    return connection.query(query).then(rows => {
+    return connection._query(query).then(rows => {
       const map = makeMapTable(table);
       rows.forEach(row => map.append(toDocument(row, table.model)));
       for (const record of table.recordList) {
@@ -598,7 +598,7 @@ export function _insertRecords(
 
   const into = escape(table.name);
   const query = `insert into ${into} (${columns}) values ${values.join(',')}`;
-  return connection.query(query, table.model.keyField().column.name);
+  return connection._query(query, table.model.keyField().column.name);
 }
 
 export async function replaceRecord(
@@ -704,7 +704,7 @@ async function _buildMapTable(
   const from = dialect.escapeId(model.table.name);
   const where = encodeFilter(filter, table.model, dialect);
   const query = `select ${columns.join(',')} from ${from} where ${where}`;
-  const rows = await connection.query(query);
+  const rows = await connection._query(query);
   const mapTable = makeMapTable(table);
   rows.forEach(row => mapTable.append(toDocument(row, table.model)));
   return mapTable;
