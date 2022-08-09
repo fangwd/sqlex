@@ -71,7 +71,7 @@ function append(
     } else {
       // "*": "categoryAttributes[name,value]"
       if (!attrs) {
-        throw Error(`Unknown field: ${key}`);
+        throw Error(`Unknown field: ${row.__table.name}.${key}`);
       }
       const { field } = attrs;
       const table = db.table(field.referencingField.model);
@@ -361,6 +361,9 @@ export class LoadingConfig {
     let model = this.model;
     for (let i = 0; i < names.length - 1; i++) {
       const field = model.field(names[i]);
+      if (!field) {
+        throw Error(`Invalid field: ${model.name}.${names[i]}`);
+      }
       if (field instanceof ForeignKeyField) {
         model = field.referencedField.model;
       } else {

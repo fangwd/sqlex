@@ -328,7 +328,7 @@ export class Record {
   }
 
   __dump() {
-    const data = { __state: this.__state.json() };
+    const data = { __state: this.__state.json(), __missing: [], __flushable: this.__flushable() };
     for (const field of this.__table.model.fields) {
       let name = field.name;
       const value = this.__data[name];
@@ -345,6 +345,17 @@ export class Record {
           data[name] = record.__repr();
         }
       }
+      else {
+        if (field instanceof SimpleField) {
+          const { autoIncrement, nullable, default: defaultValue } = field.column;
+          if (!nullable && !autoIncrement && defaultValue === undefined) {
+            data.__missing.push(field.name);
+          }
+        }
+      }
+    }
+    if (data.__missing.length === 0) {
+      delete data.__missing;
     }
     return data;
   }

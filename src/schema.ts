@@ -675,7 +675,7 @@ function getBridgeField(left: Model, right: Model) {
   for (const field of left.fields) {
     if (field instanceof RelatedField) {
       if (field.throughField) {
-        if (field.throughField.model === right) {
+        if (field.throughField.referencedField.model === right) {
           return field.throughField;
         }
       } else if (field.referencingField.model === right) {
