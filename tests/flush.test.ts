@@ -7,7 +7,7 @@ import helper = require('./helper');
 const NAME = 'flush';
 
 beforeAll(() => helper.createDatabase(NAME));
-//afterAll(() => helper.dropDatabase(NAME));
+afterAll(() => helper.dropDatabase(NAME));
 
 test('append', () => {
   const schema = new Schema(helper.getExampleData());
