@@ -7,7 +7,7 @@ import helper = require('./helper');
 const NAME = 'flush';
 
 beforeAll(() => helper.createDatabase(NAME));
-afterAll(() => helper.dropDatabase(NAME));
+//afterAll(() => helper.dropDatabase(NAME));
 
 test('append', () => {
   const schema = new Schema(helper.getExampleData());
@@ -233,7 +233,7 @@ test('flush #3', async done => {
   order2.user = user2;
   user3.status = order2;
 
-  db.flush().then(async ({connection}) => {
+  db.flush().then(async ({ connection }) => {
     expect(connection.queryCounter.total).toBe(10);
     const user = await db.table('user').get({ email });
     const order = await db.table('order').get({ code });
@@ -409,7 +409,7 @@ test('afterBegin', async done => {
 
   expect(comments.length).toBe(2);
   expect(!!comments.find(c => c.id === comment.id)).toBe(true);
-  if (process.env.DB_TYPE !== 'sqlite3') {
+  if (!helper.isSqlite3()) {
     expect(!!comments.find(c => c.id === deleted.id)).toBe(false);
   }
   db.end();
@@ -627,7 +627,6 @@ test('replaceRecordsIn (3)', async done => {
   db.clear();
 
   user = db.append('user', { email: 'alice' });
-
   // post with title '0', no comments
   db.table('post').append({ id: allPosts[0].id, title: '0', user });
 

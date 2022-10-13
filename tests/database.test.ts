@@ -1,6 +1,6 @@
 import { Schema } from '../src/schema';
 import { Value } from '../src/types';
-import helper = require('./helper');
+import * as helper from './helper';
 
 const NAME = 'database';
 
@@ -905,7 +905,7 @@ describe('db.select', () => {
   });
 
   test('raw fields', async () => {
-    if (helper.DB_TYPE === 'sqlite3') {
+    if (helper.isSqlite3()) {
       return;
     }
     const db = helper.connectToDatabase(NAME);

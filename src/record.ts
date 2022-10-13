@@ -14,7 +14,7 @@ import { Document, Value } from './types';
 export type FieldValue = Value | Record;
 
 export const RecordProxy = {
-  set: function(record: Record, name: string, value: any) {
+  set: function (record: Record, name: string, value: any) {
     if (!/^__/.test(name)) {
       if (value === undefined) {
         throw Error(`Assigning undefined to ${name}`);
@@ -67,7 +67,7 @@ export const RecordProxy = {
     return true;
   },
 
-  get: function(record: Record, name: string) {
+  get: function (record: Record, name: string) {
     if (typeof name === 'string' && !/^__/.test(name)) {
       if (typeof record[name] !== 'function') {
         const model = record.__table.model;
@@ -126,6 +126,8 @@ export class Record {
             });
           });
         });
+      }).catch(error => {
+        throw error
       });
     });
   }
@@ -260,7 +262,7 @@ export class Record {
 
   __filter(): Row {
     const self = this;
-    const data = Object.keys(this.__data).reduce(function(acc, cur, i) {
+    const data = Object.keys(this.__data).reduce(function (acc, cur, i) {
       acc[cur] = self.__getValue(cur);
       return acc;
     }, {});
@@ -389,7 +391,7 @@ export class RecordSet {
   }
 
   // user.groups.replaceWith([admin, customer])
-  replaceWith() {}
+  replaceWith() { }
 
   // user.groups.remove(admin)
   remove(record: Record) {
@@ -400,7 +402,7 @@ export class RecordSet {
 }
 
 export function getModel(table: Table, bulk: boolean = false) {
-  const model: any = function(data) {
+  const model: any = function (data) {
     if (bulk) return table.append(data);
     const record = new Proxy(new Record(table), RecordProxy);
     Object.assign(record, data);

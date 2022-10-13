@@ -1,4 +1,4 @@
-import helper = require('./helper');
+import * as helper from './helper';
 import { ViewModel } from '../src/view';
 import { SimpleField } from '../src/schema';
 import { QueryBuilder } from '../src/filter';
@@ -156,7 +156,7 @@ describe('query', () => {
       ],
     });
     const builder = new QueryBuilder(view, db.pool);
-    if (process.env.DB_TYPE !== 'sqlite3') {
+    if (!helper.isSqlite3()) {
       const sql = builder.select(
         ['p.*', 'u.firstName', "concat(p.name, '@', p.price) as product"],
         {}
@@ -203,7 +203,7 @@ describe('query', () => {
 
 describe('raw fields', () => {
   test('extract parts from date', async () => {
-    if (helper.DB_TYPE === 'sqlite3') {
+    if (helper.isSqlite3()) {
       return;
     }
     const db = helper.connectToDatabase(NAME);

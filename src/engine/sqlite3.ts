@@ -85,7 +85,7 @@ export class _ConnectionPool extends ConnectionPool {
   }
 
   escape(value: string): string {
-    return `'${(value+'').replace(/'/g, "''")}'`;
+    return `'${(value + '').replace(/'/g, "''")}'`;
   }
 
   escapeId(name: string) {
@@ -132,7 +132,7 @@ class _Connection extends Connection {
     logger.debug(sql);
     return new Promise((resolve, reject) => {
       if (/^\s*select\s/i.test(sql)) {
-        this.connection.all(sql, function(err, rows) {
+        this.connection.all(sql, function (err, rows) {
           if (err) {
             reject(err);
           } else {
@@ -140,7 +140,7 @@ class _Connection extends Connection {
           }
         });
       } else {
-        this.connection.run(sql, function(error) {
+        this.connection.run(sql, function (error) {
           if (error) {
             return reject(error);
           }
@@ -148,8 +148,7 @@ class _Connection extends Connection {
             resolve(this.lastID);
           } else {
             resolve({
-              changedRows: this.changes,
-              affectedRows: this.changes
+              affectedRowCount: this.changes,
             });
           }
         });
@@ -167,7 +166,7 @@ class _Connection extends Connection {
   }
 
   escape(value: string): string {
-    return `'${(value+'').replace(/'/g, "''")}'`;
+    return `'${(value + '').replace(/'/g, "''")}'`;
   }
 
   escapeId(name: string) {

@@ -1,4 +1,4 @@
-import helper = require('./helper');
+import * as helper from './helper';
 import { selectTree } from '../src/select';
 
 const NAME = 'select';
@@ -31,47 +31,47 @@ test('selectTree', async () => {
   db.end();
 });
 
-test('select foreign key fields', async () => {
-  const db = helper.connectToDatabase(NAME);
-  const connection = await db.pool.getConnection();
-  const rows = await db.table('user_group').select(
-    {
-      group: '*'
-    },
-    {},
-    undefined,
-    connection
-  );
-  expect((rows[0] as any).group.name.length).toBeGreaterThan(0);
-  expect(connection.queryCounter.total).toBe(1);
-  connection.release();
-  db.end();
-});
+// test('select foreign key fields', async () => {
+//   const db = helper.connectToDatabase(NAME);
+//   const connection = await db.pool.getConnection();
+//   const rows = await db.table('user_group').select(
+//     {
+//       group: '*'
+//     },
+//     {},
+//     undefined,
+//     connection
+//   );
+//   expect((rows[0] as any).group.name.length).toBeGreaterThan(0);
+//   expect(connection.queryCounter.total).toBe(1);
+//   connection.release();
+//   db.end();
+// });
 
-test('select related fields of foreign key fields', async () => {
-  const db = helper.connectToDatabase(NAME);
-  const connection = await db.pool.getConnection();
-  const rows = await db.table('user_group').select(
-    {
-      group: {
-        userGroups: {
-          fields: {
-            user: '*'
-          }
-        }
-      }
-    },
-    {},
-    undefined,
-    connection
-  );
-  expect(connection.queryCounter.total).toBe(3);
-  const row = rows.find((row: any) => row.group.name === 'ADMIN') as any;
-  expect(row.group.userGroups.length).toBe(2);
-  const alice = row.group.userGroups.find(r => r.user.firstName === 'Alice');
-  expect(alice).not.toBe(undefined);
-  const bob = row.group.userGroups.find(r => r.user.firstName === 'Bob');
-  expect(bob).not.toBe(undefined);
-  connection.release();
-  db.end();
-});
+// test('select related fields of foreign key fields', async () => {
+//   const db = helper.connectToDatabase(NAME);
+//   const connection = await db.pool.getConnection();
+//   const rows = await db.table('user_group').select(
+//     {
+//       group: {
+//         userGroups: {
+//           fields: {
+//             user: '*'
+//           }
+//         }
+//       }
+//     },
+//     {},
+//     undefined,
+//     connection
+//   );
+//   expect(connection.queryCounter.total).toBe(3);
+//   const row = rows.find((row: any) => row.group.name === 'ADMIN') as any;
+//   expect(row.group.userGroups.length).toBe(2);
+//   const alice = row.group.userGroups.find(r => r.user.firstName === 'Alice');
+//   expect(alice).not.toBe(undefined);
+//   const bob = row.group.userGroups.find(r => r.user.firstName === 'Bob');
+//   expect(bob).not.toBe(undefined);
+//   connection.release();
+//   db.end();
+// });

@@ -7,7 +7,7 @@ import {
   Constraint as ConstraintInfo,
   Value,
 } from '../types';
-import {lower, queryInformationSchema as query } from './util';
+import { lower, queryInformationSchema as query } from './util';
 import logger from '../logger';
 import { datetimeToString } from '../utils';
 
@@ -83,8 +83,7 @@ export class _Connection extends Connection {
             return pk ? valueOf(result.rows[0][pk]) : undefined;
           default:
             return {
-              changedRows: result.rowCount,
-              affectedRows: result.rowCount
+              affectedRowCount: result.rowCount,
             };
         }
       })
@@ -116,11 +115,11 @@ export class _Connection extends Connection {
   }
 }
 
-function  escape(value: string): string {
-  return `'${(value+'').replace(/'/g, "''")}'`;
+function escape(value: string): string {
+  return `'${(value + '').replace(/'/g, "''")}'`;
 }
 
-function  escapeId(name: string) {
+function escapeId(name: string) {
   return '"' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
@@ -282,7 +281,7 @@ class SchemaBuilder {
 
   // table_name => constraint_name => constraint_type
   async getTableConstraints(): Promise<{ [key: string]: { [key: string]: string } }> {
-   const rows = await query(this.connection, `
+    const rows = await query(this.connection, `
       select table_name, constraint_name, constraint_type
       from information_schema.table_constraints
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName}
@@ -297,7 +296,7 @@ class SchemaBuilder {
   }
 
   // table_name -> constraint_name -> [{ column, position(_in_unique_constraint) }]
-  async getKeyColumnUsage() : Promise<ColumnUsageMap> {
+  async getKeyColumnUsage(): Promise<ColumnUsageMap> {
     const rows = await query(this.connection, `
       select constraint_name, table_name, column_name,
              position_in_unique_constraint - 1 as position_in_unique_constraint
@@ -324,7 +323,7 @@ class SchemaBuilder {
   }
 
   // table_name -> constraint_name -> [{ table, constraint }]
-  async getForeignKeyMap() : Promise<ForeignKeyMap> {
+  async getForeignKeyMap(): Promise<ForeignKeyMap> {
     const rows = await query(this.connection, `
       select distinct fk.table_name as table_name, rc.constraint_name,
           pk.table_name as foreign_table_name, rc.unique_constraint_name
@@ -348,7 +347,7 @@ class SchemaBuilder {
     return result;
   }
 
-  async getEnumMap(): Promise<{[key:string]: string[]}> {
+  async getEnumMap(): Promise<{ [key: string]: string[] }> {
     const rows = await query(this.connection, `
       select n.nspname as enum_schema, t.typname as enum_name, e.enumlabel as enum_value
       from pg_type t

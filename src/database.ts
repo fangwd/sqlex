@@ -46,7 +46,7 @@ export class ClosureTable {
     public ancestor: ForeignKeyField,
     public descendant: ForeignKeyField,
     public depth?: SimpleField
-  ) {}
+  ) { }
 }
 
 export class Database {
@@ -190,7 +190,7 @@ export class Database {
     }, {});
   }
 
-  async query<T=Document[]>(fmt: string, ...args) {
+  async query<T = Document[]>(fmt: string, ...args) {
     const connection = await this.pool.getConnection();
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
     const sql = sprintf(fmt, val, this.pool)
@@ -199,7 +199,7 @@ export class Database {
     return result as T;
   }
 
-  async select<T extends Document=Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
+  async select<T extends Document = Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
     if (typeof options.from === 'string') {
       const table = this.table(options.from);
       if (table) {
@@ -233,7 +233,7 @@ export class Database {
   }
 
   // Deletes all records from all tables
-  async zap(excludes: string[]=[]) {
+  async zap(excludes: string[] = []) {
     const self = this;
     const { models, fields } = self.schema.sort;
     for (const key of fields) {
@@ -371,7 +371,7 @@ export class Table {
   }
 
   async first<T extends Document = Document>(fields: string | Document | string[], filter: Filter = {}, orderBy?: OrderBy) {
-    const rows = await this.select<T>(fields, {where: filter, limit: 1, orderBy});
+    const rows = await this.select<T>(fields, { where: filter, limit: 1, orderBy });
     return rows[0];
   }
 
@@ -563,8 +563,8 @@ export class Table {
     );
   }
 
-  async existing(data: Document): Promise<Array<{row: Document, constraint: Constraint}>> {
-    const result: Array<{row: Document, constraint: Constraint}> = [];
+  async existing(data: Document): Promise<Array<{ row: Document, constraint: Constraint }>> {
+    const result: Array<{ row: Document, constraint: Constraint }> = [];
     for (const constraint of this.model.table.constraints) {
       if (constraint.primaryKey || constraint.unique) {
         const fields = constraint.columns.map(name => this.model.field(name));
@@ -583,7 +583,7 @@ export class Table {
         }
         const row = await this.get(filter);
         if (row) {
-          result.push({row, constraint});
+          result.push({ row, constraint });
         }
       }
     }
@@ -620,10 +620,10 @@ export class Table {
     const builder = new QueryBuilder(this.model, this.db.pool, this.db.operatorMap);
 
     if (this.selectOnly) {
-      options = { ...options, where: {...options.where, ...this.selectOnly } };
+      options = { ...options, where: { ...options.where, ...this.selectOnly } };
     }
 
-    let sql = builder.select(fields, {...options, filterThunk});
+    let sql = builder.select(fields, { ...options, filterThunk });
 
     if (options.limit !== undefined) {
       sql += ` limit ${parseInt(options.limit + '')}`;
@@ -1107,9 +1107,9 @@ export class Table {
       table._get(connection, arg).then(row =>
         row
           ? mapping._create(connection, {
-              [related.referencingField.name]: value,
-              [related.throughField.name]: row[table.model.keyField().name]
-            })
+            [related.referencingField.name]: value,
+            [related.throughField.name]: row[table.model.keyField().name]
+          })
           : Promise.resolve(null)
       )
     );
@@ -1250,7 +1250,7 @@ export class Table {
         self
           .update(data, where)
           .then(result => {
-            if (result.changedRows === 1) {
+            if (result.affectedRowCount === 1) {
               resolve(row);
             } else if (try_count++ < MAX_TRY) {
               setTimeout(_select, Math.random() * 1000);
@@ -1566,7 +1566,7 @@ export class Table {
     return mock(this, data, save);
   }
 
-  mockMany(data:Document[], save?: boolean) {
+  mockMany(data: Document[], save?: boolean) {
     return mock(this, data, save);
   }
 }

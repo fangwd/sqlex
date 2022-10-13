@@ -3,11 +3,12 @@ import { Document, Value } from '../types';
 import sprintf from '../sprintf';
 import { isPlainObject } from '../utils';
 
-export type Dialect = 'mysql' | 'postgres' | 'mssql' | 'oracle' | 'sqlite3';
+export type Dialect = 'mysql' | 'postgres' | 'mssql' | 'oracle' | 'sqlite3' | 'generic';
 
 export interface ConnectionInfo {
   dialect: Dialect;
   connection: { [key: string]: any };
+  driver?: string;
 }
 
 export type Row = {
@@ -26,7 +27,7 @@ export interface DialectEncoder {
   dialect: Dialect;
   escape: (unsafe: any) => string;
   escapeId: (unsafe: string) => string;
-  escapeDate: (date:Date) => string;
+  escapeDate: (date: Date) => string;
 }
 
 export abstract class Connection implements DialectEncoder {
@@ -37,7 +38,7 @@ export abstract class Connection implements DialectEncoder {
 
   abstract _query(sql: string, pk?: string): Promise<any>;
 
-  query<T=Document[]>(fmt: string, ...args) {
+  query<T = Document[]>(fmt: string, ...args) {
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
     const sql = sprintf(fmt, val, this);
     return this._query(sql) as Promise<T>;
@@ -93,7 +94,7 @@ export abstract class ConnectionPool implements DialectEncoder {
 
 export function createConnectionPool(
   dialect: Dialect,
-  connection: any
+  connection: any,
 ): ConnectionPool {
   if (dialect === 'mysql') {
     return require('./mysql').default.createConnectionPool(connection);
@@ -105,6 +106,10 @@ export function createConnectionPool(
 
   if (dialect === 'postgres') {
     return require('./postgres').default.createConnectionPool(connection);
+  }
+
+  if (dialect === 'generic') {
+    return require('./generic').default.createConnectionPool(connection);
   }
 
   throw Error(`Unsupported engine type: ${dialect}`);
@@ -123,6 +128,10 @@ export function createConnection(dialect: string, connection: any): Connection {
 
   if (dialect === 'postgres') {
     return require('./postgres').default.createConnection(connection);
+  }
+
+  if (dialect === 'generic') {
+    return require('./generic').default.createConnection(connection);
   }
 
   throw Error(`Unsupported engine type: ${dialect}`);

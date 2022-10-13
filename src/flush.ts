@@ -133,7 +133,7 @@ function _persist(connection: Connection, record: Record): Promise<Record> {
 
   if (method === FlushMethod.UPDATE) {
     return record.__table._update(connection, fields, filter).then(result => {
-      if (result.changedRows > 0) {
+      if (result.affectedRowCount > 0) {
         record.__remove_dirty(Object.keys(fields));
         return record;
       }
@@ -352,7 +352,7 @@ function _flushTable(
       let i = 0;
       for (const entry of nameMap.values()) {
         let id = results[i++];
-        if (connection.dialect === 'sqlite3') {
+        if (connection.dialect === 'sqlite3' || connection.dialect === 'generic') {
           // sqlite3 returns the "last" inserted id
           for (let j = entry.records.length - 1; j >= 0; j--) {
             const record = entry.records[j];
@@ -543,11 +543,11 @@ export function flushDatabase(
 
 function isIntegrityError(error) {
   // postgres: duplicate key value violates unique constraint "order_pkey"
-  return /\bDuplicate\b|UNIQUE constraint/i.test(error.message || error.error);
+  return /\bDuplicate\b|UNIQUE constraint|\blocked\b/i.test(error.message || error.error);
 }
 
 function isRetryable(error) {
-  return /\bDeadlock\b/i.test(error.message);
+  return /\b(Deadlock|locked)\b/i.test(error.message);
 }
 
 export function dumpDirtyRecords(db: Database, all: boolean = false) {

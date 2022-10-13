@@ -26,7 +26,7 @@ function createSQLite3Database(name): Promise<void> {
   return new Promise(resolve => {
     function _create() {
       const db = new sqlite3.Database(filename);
-      db.serialize(function() {
+      db.serialize(function () {
         (SCHEMA + DATA).split(';').forEach(line => {
           const stmt = line.replace(/auto_increment|--.*?(\n|$)/gi, '\n');
           if (stmt.trim() && !/^\s*alter/i.test(stmt)) {
@@ -134,7 +134,7 @@ export async function createPostgresDatabase(
   for (const model of schema.models) {
     if (model.primaryKey.autoIncrement()) {
       const table = model.table.name;
-      const id = model.keyField().column.name;
+      const id = model.keyField()!.column.name;
       const seq = `${table}_${id}_seq`;
       await db.query(
         `SELECT setval('${seq}', COALESCE((SELECT MAX("${id}")+1 FROM "${table}"), 1), false)`
@@ -171,8 +171,8 @@ function createMySQLDatabase(name: string, data = true): Promise<any> {
     `create database ${database}`,
     `use ${database}`
   ].concat(sql.split(';')
-   .filter(line => line.trim())
-   .map(line => line.replace(/\b(\d+-\d+-\d+)T(\d+:\d+:\d+\.\d+)Z\b/g, '$1 $2'))
+    .filter(line => line.trim())
+    .map(line => line.replace(/\b(\d+-\d+-\d+)T(\d+:\d+:\d+\.\d+)Z\b/g, '$1 $2'))
   );
 
   return serialise(line => {
@@ -218,7 +218,7 @@ function createMySQLConnection(name: string): Connection {
 
 function serialise(func, argv: any[]) {
   return new Promise(resolve => {
-    const results = [];
+    const results: any[] = [];
     let next = 0;
     function _resolve() {
       if (next >= argv.length) {
@@ -254,6 +254,8 @@ export function createDatabase(name: string, data = true): Promise<any> {
       return createSQLite3Database(name);
     case 'postgres':
       return createPostgresDatabase(name);
+    case 'generic':
+      return createGenericDatabase(name);
     default:
       throw Error(`Unsupported engine type: ${DB_TYPE}`);
   }
@@ -267,6 +269,8 @@ export function dropDatabase(name: string): Promise<any> {
       return dropSQLite3Database(name);
     case 'postgres':
       return dropPostgresDatabase(name);
+    case 'generic':
+      return dropGenericDatabase(name);
     default:
       throw Error(`Unsupported engine type: ${DB_TYPE}`);
   }
@@ -280,6 +284,8 @@ export function createTestConnection(name: string): Connection {
       return createSQLite3Connection(name);
     case 'postgres':
       return createPostgresConnection(name);
+    case 'generic':
+      return createGenericConnection(name);
     default:
       throw Error(`Unsupported engine type: ${DB_TYPE}`);
   }
@@ -315,67 +321,48 @@ export function getDatabaseName(name: string): string {
   return `${DB_NAME}_${name}`;
 }
 
-/*
-const { parseString } = require('xml2js');
-parseString(fs.readFileSync(options.validate).toString(), (err, res) => {
-  if (err) throw err;
-  const keys = Object.keys(res);
-  const key = keys[0].charAt(0).toUpperCase() + keys[0].slice(1);
-  validateXstream(schema.model(key), res[keys[0]]);
-});
-
-function validateXstream(
-  model: Model,
-  data: Document,
-  map?: Map<string, string>
-) {
-  if (!map) map = new Map();
-
-  const id = _xmlAttr(data, 'id');
-
-  if (id) {
-    map.set(id, model.name);
+function createGenericDatabase(name): Promise<void> {
+  const addon = require(process.env['SQLEX_DRIVER'] || './mydb');
+  const filename = `${DB_NAME}_${name}`;
+  if (fs.existsSync(filename)) {
+    fs.unlinkSync(filename)
   }
-
-  const reference = _xmlAttr(data, 'reference');
-  if (reference) {
-    const type = map.get(reference);
-    if (type !== model.name) {
-      throw Error(`Reference ${reference}: ${type}`);
-    }
-  }
-
-  for (const field of model.fields) {
-    const value = data[field.name];
-    if (value === null || value === undefined) {
-      continue;
-    }
-    if (field instanceof ForeignKeyField) {
-      const model = field.referencedField.model;
-      validateXstream(model, value[0] as Document, map);
-    } else if (field instanceof RelatedField) {
-      const model = field.throughField
-        ? field.throughField.referencedField.model
-        : field.referencingField.model;
-      if (typeof value[0] !== 'object') continue; // [ '\n' ]
-      if (field.referencingField.isUnique()) {
-        validateXstream(model, value[0], map);
-      } else {
-        const name = Object.keys(value[0])[0];
-        if (name !== lcfirst(model.name)) {
-          throw Error(`${name} != ${model.name}`);
-        }
-        for (const entry of value[0][name] as Document[]) {
-          validateXstream(model, entry, map);
-        }
+  const connection = new addon.Connection('sqlite3://' + filename);
+  const stmt = (SCHEMA.replace(/alter table.*?\n/i, '') + DATA).replace(/auto_increment|--.*?(\n|$)/gi, '\n');
+  return new Promise(resolve => {
+    connection.query(stmt, err => {
+      if (err) {
+        console.error(`Error: ${err} (${stmt})`);
+        throw err;
       }
-    }
-  }
+      resolve();
+    });
+  })
 }
 
-function _xmlAttr(node: any, name: string) {
-  return node.$ && (node.$ as any)[name];
+function dropGenericDatabase(name): Promise<void> {
+  const filename = `${DB_NAME}_${name}`;
+  return new Promise(resolve => {
+    fs.access(filename, error => {
+      if (!error) {
+        fs.unlink(filename, err => {
+          if (err) throw err;
+          resolve();
+        });
+      }
+    });
+  });
 }
-*/
 
-process.on('unhandledRejection', console.log);
+function createGenericConnection(name: string): Connection {
+  return createConnection('generic', {
+    user: DB_USER,
+    host: DB_HOST,
+    database: getDatabaseName(name),
+    password: DB_PASS
+  });
+}
+
+export function isSqlite3(dialect?: string) {
+  return /sqlite3|generic/.test(dialect || DB_TYPE);
+}

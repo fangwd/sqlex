@@ -329,4 +329,7 @@ $ DB_TYPE=postgres DB_USER=postgres npm run test
 
 # Test for MySQL
 $ DB_TYPE=mysql DB_USER=root DB_PASS=secret npm run test
+
+# Test for generic driver
+$ DB_TYPE='generic' SQLEX_DRIVER='/path/to/sqlex.node' npm run test
 ```

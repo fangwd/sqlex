@@ -1,6 +1,6 @@
 import { getInformationSchema } from '../src/engine';
 import { Schema } from '../src/schema';
-import helper = require('./helper');
+import * as helper from './helper';
 
 const NAME = 'engine';
 
@@ -107,7 +107,7 @@ test('transaction rollback - bad value', done => {
               expect(rows[0].name).toBe('Grocery');
               return conn.query(
                 `insert into category(d, name, parent_id) values (${ID +
-                  1}, 'Dairy', -1)`
+                1}, 'Dairy', -1)`
               );
             });
         });
@@ -181,7 +181,7 @@ test('transaction commit (by user)', done => {
                   conn
                     .query(
                       `select * from category where id in (${ID}, ${ID +
-                        1}) order by id`
+                      1}) order by id`
                     )
                     .then(rows => {
                       expect(rows.length).toBe(2);
@@ -214,7 +214,7 @@ test('transaction rollback (by user)', done => {
                 conn
                   .query(
                     `select * from category where id in (${ID}, ${ID +
-                      1}) order by id`
+                    1}) order by id`
                   )
                   .then(rows => {
                     expect(rows.length).toBe(0);
@@ -250,7 +250,7 @@ test('pool', done => {
 
 test('getInformationSchema', async done => {
   const connection = helper.createTestConnection(NAME);
-  if (connection.dialect !== 'sqlite3') {
+  if (!helper.isSqlite3(connection.dialect)) {
     const schemaInfo = await getInformationSchema(
       connection,
       helper.getDatabaseName(NAME)
