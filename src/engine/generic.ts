@@ -11,17 +11,28 @@ interface PoolOptions {
 type Client<Connection> = {
   resolve: (connection: Connection) => void;
   reject: (reason: any) => void;
+  createdAt: number;
 };
 
 export class GenericPool<Resource extends { end: () => void }> {
   idle: Array<Resource>;
   busy: Array<Resource>;
   queue: Array<Client<Resource>>;
+  intervalId: any;
 
-  constructor(private create: () => Resource, public maxSize: number = 1) {
+  constructor(private create: () => Resource, public maxSize: number = 1, public maxClientWaitTime = 1000) {
     this.idle = [];
     this.busy = [];
     this.queue = [];
+    this.intervalId = setInterval(() => {
+      const now = new Date().getTime();
+      for (const entry of this.queue) {
+        if (now - entry.createdAt > this.maxClientWaitTime) {
+          const seconds = ((now - entry.createdAt) / 1000.0).toFixed(2);
+          console.error(`Warn: pool client has waited for ${seconds} second(s)\n`)
+        }
+      }
+    }, 500)
   }
 
   get connectionCount() {
@@ -30,7 +41,7 @@ export class GenericPool<Resource extends { end: () => void }> {
 
   allocate(): Promise<Resource> {
     return new Promise<Resource>((resolve, reject) => {
-      const client: Client<Resource> = { resolve, reject };
+      const client: Client<Resource> = { resolve, reject, createdAt: new Date().getTime() };
       if (this.idle.length > 0) {
         this.assign(client);
       } else if (this.connectionCount < this.maxSize) {
@@ -62,6 +73,7 @@ export class GenericPool<Resource extends { end: () => void }> {
   }
 
   async end() {
+    clearInterval(this.intervalId);
     for (const item of this.idle) {
       await item.end();
     }
