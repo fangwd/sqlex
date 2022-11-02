@@ -1,6 +1,7 @@
 export interface Schema {
   name?: string;
   tablePrefix?: string;
+  virtualForeignKeys?: { [key: string]: string };
   models: Model[];
 }
 

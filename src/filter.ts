@@ -752,7 +752,7 @@ export class QueryBuilder {
     if (!builder.skipJoin) {
       const name = `${this.escapeId(model.table.name)} ${builder.alias}`;
       const lhs = this.encodeField(field);
-      const rhs = builder.encodeField(model.keyField());
+      const rhs = builder.encodeField(field.referencedField.column.name);
       this.getFroms().push(`${name} on ${lhs}=${rhs}`);
     }
 

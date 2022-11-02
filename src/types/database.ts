@@ -37,6 +37,7 @@ export interface Constraint {
   primaryKey?: boolean;
   unique?: boolean;
   references?: ReferencedConstraint;
+  isVirtual?: boolean;
 }
 
 export interface ReferencedConstraint extends Constraint {

@@ -241,3 +241,16 @@ test('setModelName', () => {
     expect(field.name).toBe('webPost');
   }
 });
+
+describe('virtual foreign keys', () => {
+  it('should recognise virtual foreign keys', () => {
+    const schema = new Schema(helper.getExampleData(), {
+      virtualForeignKeys: {'service_log.product_code': 'product.sku'},
+      models: []
+    });
+    const model = schema.model('service_log') as Model;
+    const field = model.field('productCode') as ForeignKeyField;
+    expect(field.referencedField.column.name).toBe('sku');
+  });
+
+});

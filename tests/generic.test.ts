@@ -8,10 +8,7 @@ class TestResource {
 
 function creator() {
     let nextId = 1;
-    return () => new Promise<TestResource>(resolve => {
-        setTimeout(() => resolve(new TestResource(nextId++)), 200);
-    })
-
+    return () => new TestResource(nextId++);
 }
 
 function getWithTimeout(pool: GenericPool<TestResource>, timeout: number): Promise<TestResource | null> {
@@ -34,6 +31,7 @@ it('should wait when pool is full', async () => {
     expect(res2.id).toBe(2)
     const res3 = await getWithTimeout(pool, 200)
     expect(res3).toBe(null)
+    pool.end();
 })
 
 it('should use reclaimed resources', async () => {
@@ -45,4 +43,5 @@ it('should use reclaimed resources', async () => {
     setTimeout(() => pool.reclaim(res1), 100)
     const res3 = await getWithTimeout(pool, 200)
     expect(res3?.id).toBe(1);
+    pool.end();
 });

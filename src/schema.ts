@@ -8,7 +8,7 @@ import {
   DEFAULT_FIELD as DEFAULT_FIELD_CONFIG,
   DEFAULT_CLOSURE_TABLE_FIELDS
 } from './config';
-import { pluralise, toPascalCase, toCamelCase, lcfirst } from './utils';
+import { pluralise, toPascalCase, toCamelCase, lcfirst, clone } from './utils';
 import { sort } from './mock';
 
 export class Schema {
@@ -20,6 +20,19 @@ export class Schema {
   private modelMap: Map<string, Model>;
 
   constructor(database: types.Database, config?: SchemaConfig) {
+    if (config && config.virtualForeignKeys) {
+      database = clone(database);
+      for (const key in config.virtualForeignKeys) {
+        const { referencing, referenced } = validateVirtualForeignKey(database, key, config.virtualForeignKeys[key]);
+        const { table, column } = referencing;
+        table.constraints.push({
+          columns: [column.name],
+          references: {table: referenced.table.name, columns: [referenced.column.name] },
+          isVirtual: true,
+        })
+      }
+    }
+
     this.database = database;
     this.config = { ...DEFAULT_SCHEMA_CONFIG, ...config };
     this.modelMap = new Map();
@@ -772,4 +785,24 @@ function getBridgedModel(field: ForeignKeyField | RelatedField) {
   return field.throughField
     ? field.throughField.referencedField.model
     : field.referencingField.model;
+}
+
+function validateColumnRef(schemaInfo: types.Database, columnRef: string) {
+  const [tableName, columnName] = columnRef.split('.');
+  const table = schemaInfo.tables.find(t => t.name === tableName);
+  if (!table) {
+    throw Error(`Bad virtual foreign key: ${columnRef} (table not found)`);
+  }
+  const column = table.columns.find(c => c.name === columnName);
+  if (!column) {
+    throw Error(`Bad virtual foreign key: ${columnRef} (column not found)`);
+  }
+  return { table, column };
+}
+
+function validateVirtualForeignKey(schemaInfo: types.Database, referencing: string, referenced:string) {
+  return {
+    referencing: validateColumnRef(schemaInfo, referencing),
+    referenced: validateColumnRef(schemaInfo, referenced)
+  }
 }

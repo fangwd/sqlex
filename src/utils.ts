@@ -118,3 +118,7 @@ export function dateToString(value: string | Date, utc=false) {
 export function timeToString(value: string | Date, utc=false) {
   return datetimeToString(value, utc).split('T')[1];
 }
+
+export function clone(plainObject: any) {
+  return JSON.parse(JSON.stringify(plainObject));
+}

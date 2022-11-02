@@ -1,7 +1,7 @@
-import { Schema } from '../src/schema';
+import { Model, Schema } from '../src/schema';
 import { encodeFilter, QueryBuilder, plainify } from '../src/filter';
 
-import helper = require('./helper');
+import * as helper from './helper';
 import { DialectEncoder } from '../src/engine';
 
 const NAME = 'filter';
@@ -13,7 +13,7 @@ const data = helper.getExampleData();
 const domain = new Schema(data);
 
 test('split name and operator', () => {
-  const model = domain.model('OrderItem');
+  const model = domain.model('OrderItem') as Model;
   const builder = new QueryBuilder(model, DefaultEscape);
   let [name, op] = builder.splitKey('orders_some');
   expect(name).toBe('orders');
@@ -24,7 +24,7 @@ test('split name and operator', () => {
 });
 
 test('configurable operators map', () => {
-  const model = domain.model('Group');
+  const model = domain.model('Group') as Model;
   const builder = new QueryBuilder(model, DefaultEscape, {like: 'rlike'});
   const sql = builder.select('*', { where: { name_like: 'adm%'}});
   expect(/\blike\b/i.test(sql)).toBe(false);
@@ -241,13 +241,6 @@ test('throughField', async () => {
   db.end();
 });
 
-const DefaultEscape : DialectEncoder = {
-  dialect: 'mysql',
-  escapeId: s => '`' + s + '`',
-  escape: s => "'" + (s + '').replace(/'/g, "\\'") + "'",
-  escapeDate: d => "'" + d.toISOString() + "'",
-};
-
 test('empty result', async () => {
   const db = helper.connectToDatabase(NAME);
   const connection = await db.pool.getConnection();
@@ -374,4 +367,41 @@ test('through field', async () => {
     where: { product: { categories_exists: { name_like: '%Apple' } } },
   });
   expect(rows.length).toBe(3);
+  db.end();
 });
+
+test('virtual foreign key', async () => {
+  const schema = new Schema(helper.getExampleData(), {
+    virtualForeignKeys: {
+      'service_log.product_code': 'product.sku',
+      'service_log.customer_email': 'user.email',
+    },
+    models: [],
+  });
+  const db = helper.connectToDatabase(NAME, schema);
+  await db.table('service_log').insert({
+    productCode: 'sku001',
+    customerEmail: 'alice@example.com',
+    serviceTime: new Date()
+  });
+  const rows = await db.table('service_log').select(
+    {
+      customerEmail: '*',
+      productCode: '*',
+    },
+    {
+      where: { productCode: { name: 'Australian Banana' }, customerEmail: { firstName: 'Alice' } },
+    }
+  );
+  expect(rows.length).toBe(1);
+  expect(rows[0].productCode.status).toBe(1);
+  expect(rows[0].customerEmail.email).toBe('alice@example.com');
+  db.end();
+});
+
+const DefaultEscape : DialectEncoder = {
+  dialect: 'mysql',
+  escapeId: s => '`' + s + '`',
+  escape: s => "'" + (s + '').replace(/'/g, "\\'") + "'",
+  escapeDate: d => "'" + d.toISOString() + "'",
+};
