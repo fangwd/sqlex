@@ -3,6 +3,7 @@ const fs = require('fs');
 
 const {
   Database,
+  Schema,
   printSchema,
   exportSchemaJava,
   printSchemaTypeScript,
@@ -35,9 +36,11 @@ const options = getopt([
   ['  ', '--config'],
   ['  ', '--fixForeignKeys'],
   ['  ', '--fixNextVal'],
+  ['  ', '--schemaFile'],
   ['  ', '--schema'],
   ['  ', '--zap', true],
   ['  ', '--exclude'],
+  ['  ', '--driver'],
 ]);
 
 (async function() {
@@ -47,6 +50,12 @@ const options = getopt([
   const user = options.user || 'root';
   const password = options.password || process.env.DATABASE_PASSWORD;
   const database = options.argv[0];
+
+  let schema = null;
+  if (options.schemaFile) {
+    schema = new Schema(JSON.parse(fs.readFileSync(options.schemaFile).toString()));
+  }
+
   const db = new Database({
     dialect,
     connection: {
@@ -55,18 +64,21 @@ const options = getopt([
       user,
       password,
       database,
-      timezone: 'Z'
+      timezone: 'Z',
+      driver: options.driver
     },
+    schema
   });
 
-  if (options.config) {
-    const config = JSON.parse(fs.readFileSync(options.config).toString());
-    await db.buildSchema(config);
-  } else {
-    await db.buildSchema({name: options.schema});
+  if (!schema) {
+    if (options.config) {
+      const config = JSON.parse(fs.readFileSync(options.config).toString());
+      await db.buildSchema(config);
+    } else {
+      await db.buildSchema({ name: options.schema });
+    }
+    schema = db.schema;
   }
-
-  const schema = db.schema;
 
   if (options.export) {
     if (options.types) {
