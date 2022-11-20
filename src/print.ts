@@ -162,7 +162,7 @@ export function printSchemaTypeScript(
 
 export type DataType = 'Date' | 'number' | 'string' | 'boolean';
 
-export function getTypeName(name: string) : DataType {
+export function getTypeName(name: string): DataType {
   if (/date|time/i.test(name)) {
     return 'Date';
   }
@@ -175,12 +175,17 @@ export function getTypeName(name: string) : DataType {
     return 'number';
   }
 
-  if (/float|double/i.test(name)) {
+  if (/float|double|decimal/i.test(name)) {
     return 'number';
   }
 
   if (/^bool/i.test(name)) {
     return 'boolean';
+  }
+
+  if (/enum/i.test(name)) {
+    // todo: export enums separately
+    return 'string';
   }
 
   throw Error(`Unknown type '${name}'`);
