@@ -194,9 +194,13 @@ export class Database {
     const connection = await this.pool.getConnection();
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
     const sql = sprintf(fmt, val, this.pool)
-    const result = await connection._query(sql);
-    connection.release();
-    return result as T;
+    try {
+      const result = await connection._query(sql);
+      return result as T;
+    }
+    finally {
+      connection.release();
+    }
   }
 
   async select<T extends Document = Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
