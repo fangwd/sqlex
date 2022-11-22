@@ -1332,7 +1332,7 @@ export class Table {
     let existing: Record;
     for (const uc of this.model.uniqueKeys) {
       const value = record.__valueOf(uc);
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         const record = this.recordMap[uc.name()][value];
         if (record) {
           if (existing && existing !== record) {
@@ -1348,7 +1348,7 @@ export class Table {
   _mapPut(record: Record) {
     for (const uc of this.model.uniqueKeys) {
       const value = record.__valueOf(uc);
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         this.recordMap[uc.name()][value] = record;
       }
     }

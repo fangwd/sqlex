@@ -274,6 +274,7 @@ export class Record {
     for (const field of uc.fields) {
       let value = this.__getValue(field.name);
       if (value === undefined) return undefined;
+      if (value === null) return null;
       values.push(_toCamel(value, field) + '');
     }
     return JSON.stringify(values).toLocaleLowerCase();
