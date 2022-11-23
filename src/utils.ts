@@ -111,14 +111,16 @@ export function datetimeToString(d: Date | string, utc = false) {
   return d.toISOString().replace(/Z$/, sign + offset);
 }
 
-export function dateToString(value: string | Date, utc=false) {
+export function dateToString(value: string | Date, utc = false) {
   return datetimeToString(value, utc).split('T')[0];
 }
 
-export function timeToString(value: string | Date, utc=false) {
+export function timeToString(value: string | Date, utc = false) {
   return datetimeToString(value, utc).split('T')[1];
 }
 
 export function clone(plainObject: any) {
   return JSON.parse(JSON.stringify(plainObject));
 }
+
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

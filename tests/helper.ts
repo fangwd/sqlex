@@ -291,7 +291,7 @@ export function createTestConnection(name: string): Connection {
   }
 }
 
-export function createTestConnectionPool(name: string): ConnectionPool {
+export function createTestConnectionPool(name: string, poolSize?: number): ConnectionPool {
   const database = `${DB_NAME}_${name}`;
   return createConnectionPool(DB_TYPE as Dialect, {
     host: DB_HOST,
@@ -299,15 +299,15 @@ export function createTestConnectionPool(name: string): ConnectionPool {
     password: DB_PASS,
     database: database,
     timezone: 'Z',
-    connectionLimit: DB_TYPE === 'sqlite3' ? 1 : 10
+    connectionLimit: poolSize || (DB_TYPE === 'sqlite3' ? 1 : 10)
   });
 }
 
-export function connectToDatabase(name: string, schema?: Schema): Database {
+export function connectToDatabase(name: string, schema?: Schema, poolSize?: number): Database {
   if (!schema) {
     schema = new Schema(getExampleData());
   }
-  const pool = createTestConnectionPool(name);
+  const pool = createTestConnectionPool(name, poolSize);
   return new Database(pool, schema);
 }
 

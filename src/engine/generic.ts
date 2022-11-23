@@ -1,5 +1,4 @@
 import { Connection, QueryCounter, ConnectionPool, Dialect } from '.';
-import * as fs from 'fs'
 import logger from '../logger';
 
 interface PoolOptions {
@@ -15,7 +14,7 @@ type Client<Connection> = {
   id: number;
 };
 
-export class GenericPool<Resource extends { end: () => void }> {
+export class GenericPool<Resource extends { end: () => void, history: QueryHistory }> {
   idle: Array<Resource>;
   busy: Array<Resource>;
   queue: Array<Client<Resource>>;
@@ -61,6 +60,7 @@ export class GenericPool<Resource extends { end: () => void }> {
 
   reclaim(item: Resource) {
     const index = this.busy.indexOf(item);
+    item.history.clear();
     if (index !== -1) {
       this.busy.splice(index, 1);
     }
@@ -88,7 +88,18 @@ export class GenericPool<Resource extends { end: () => void }> {
     for (const entry of this.queue) {
       if (now - entry.createdAt > this.maxClientWaitTime) {
         const seconds = ((now - entry.createdAt) / 1000.0).toFixed(2);
-        console.error(`Warn: client ${entry.id} has waited for ${seconds} second(s)`)
+        for (const item of this.busy) {
+          const last = item.history.last();
+          if (last && last.error) {
+            const history = item.history.records.map(rec => ({
+              query: rec.query, error: rec.error
+            }))
+            logError(history);
+            this.reclaim(item);
+            return;
+          }
+        }
+        logError(`client ${entry.id} has waited for ${seconds} second(s)`)
       }
     }
   }
@@ -160,6 +171,43 @@ type GenericConnection = {
 
 type Driver = { Connection: { new(connStr: string): GenericConnection } }
 
+export class QueryRecord {
+  query: string;
+  startTime: Date;
+  endTime?: Date;
+  error?: any;
+  constructor(query: string) {
+    this.query = query;
+    this.startTime = new Date();
+  }
+  close(error: any) {
+    this.error = error;
+    this.endTime = new Date();
+  }
+}
+
+
+export class QueryHistory {
+  records: QueryRecord[];
+  constructor() {
+    this.records = [];
+  }
+
+  clear() {
+    this.records.length = 0;
+  }
+
+  push(query: string) {
+    const record = new QueryRecord(query);
+    this.records.push(record);
+    return record;
+  }
+
+  last() {
+    return this.records.length > 0 ? this.records[this.records.length - 1] : null
+  }
+}
+
 class _Connection extends Connection {
   _pool: _ConnectionPool;
   _connected: boolean;
@@ -168,6 +216,7 @@ class _Connection extends Connection {
   driver: Driver;
   connection: GenericConnection;
   queryCounter: QueryCounter = new QueryCounter();
+  history: QueryHistory;
 
   constructor(options: { driver: string, database: string }) {
     super();
@@ -175,6 +224,7 @@ class _Connection extends Connection {
     this.driver = require(driver);
     this.connection = new this.driver.Connection('sqlite3://' + options.database);
     this.database = options.database;
+    this.history = new QueryHistory();
   }
 
   release(): Promise<void> {
@@ -188,8 +238,10 @@ class _Connection extends Connection {
   async _query(sql: string): Promise<any[] | any> {
     this.queryCounter.total++;
     logger.debug(sql);
+    const record = this.history.push(sql);
     return new Promise((resolve, reject) => {
       this.connection.query(sql, (error, result) => {
+        record.close(error)
         if (error) {
           reject(error);
         }
@@ -228,3 +280,13 @@ export default {
     return new _Connection(options);
   }
 };
+
+export function logError(error: any) {
+  if (typeof error !== 'string') {
+    error = JSON.stringify(error, null, 4);
+  }
+  process.stderr.write("Error: " + error);
+  if (!error.endsWith('\n')) {
+    process.stderr.write('\n');
+  }
+}

@@ -1,8 +1,17 @@
-import { GenericPool } from '../src/engine/generic'
+import { GenericPool, QueryHistory } from '../src/engine/generic'
+import { sleep } from '../src/utils';
+
+import * as helper from './helper';
+
+const NAME = 'generic';
+
+beforeAll(() => helper.createDatabase(NAME));
+afterAll(() => helper.dropDatabase(NAME));
 
 class TestResource {
     id: number;
-    constructor(id: number) { this.id = id; }
+    history: QueryHistory;
+    constructor(id: number) { this.id = id; this.history = new QueryHistory(); }
     end() { }
 };
 
@@ -45,3 +54,31 @@ it('should use reclaimed resources', async () => {
     expect(res3?.id).toBe(1);
     pool.end();
 });
+
+it('should auto-reclaim failed connections', async () => {
+    if (helper.DB_TYPE !== 'generic') {
+        return;
+    }
+
+    const db = helper.connectToDatabase(NAME, undefined, 2);
+    for (let i = 0; i < 2; i++) {
+        try {
+            const conn = await db.pool.getConnection();
+            await conn.query('delete from * service_log');
+        }
+        catch (e) {
+            // not releasing
+        }
+    }
+
+    await sleep(1000);
+
+    const conn = await db.pool.getConnection();
+    await conn.query('delete from service_log where id=2');
+    conn.release();
+
+    const rows = await db.table('service_log').select('*');
+    expect(rows.length).toBe(1);
+
+    await db.end();
+})
