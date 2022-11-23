@@ -3,6 +3,7 @@ import logger from '../logger';
 
 interface PoolOptions {
   connectionLimit: number;
+  connectionWait: number;
   driver: string;
   database: string;
 }
@@ -14,18 +15,22 @@ type Client<Connection> = {
   id: number;
 };
 
-export class GenericPool<Resource extends { end: () => void, history: QueryHistory }> {
+export class GenericPool<Resource extends { end: () => void; history: QueryHistory }> {
   idle: Array<Resource>;
   busy: Array<Resource>;
   queue: Array<Client<Resource>>;
   nextClientId = 0;
   intervalId: any;
 
-  constructor(private create: () => Resource, public maxSize: number = 1, public maxClientWaitTime = 1000) {
+  constructor(
+    private create: () => Resource,
+    public maxSize: number = 1,
+    public maxClientWaitTime = 1000
+  ) {
     this.idle = [];
     this.busy = [];
     this.queue = [];
-    this.intervalId = setInterval(this.checkConnectionLeak.bind(this), 500)
+    this.intervalId = setInterval(this.checkConnectionLeak.bind(this), 500);
   }
 
   get connectionCount() {
@@ -43,7 +48,7 @@ export class GenericPool<Resource extends { end: () => void, history: QueryHisto
       if (this.idle.length > 0) {
         this.assign(client);
       } else if (this.connectionCount < this.maxSize) {
-        const conn = this.create()
+        const conn = this.create();
         this.idle.push(conn);
         this.assign(client);
       } else {
@@ -91,15 +96,16 @@ export class GenericPool<Resource extends { end: () => void, history: QueryHisto
         for (const item of this.busy) {
           const last = item.history.last();
           if (last && last.error) {
-            const history = item.history.records.map(rec => ({
-              query: rec.query, error: rec.error
-            }))
+            const history = item.history.records.map((rec) => ({
+              query: rec.query,
+              error: rec.error,
+            }));
             logError(history);
             this.reclaim(item);
             return;
           }
         }
-        logError(`client ${entry.id} has waited for ${seconds} second(s)`)
+        logError(`client ${entry.id} has waited for ${seconds} second(s)`);
       }
     }
   }
@@ -112,12 +118,16 @@ export class _ConnectionPool extends ConnectionPool {
 
   constructor(options: PoolOptions) {
     super();
-    this.options = { connectionLimit: 8, ...options };
-    this.pool = new GenericPool(() => {
-      const connection = new _Connection(this.options);
-      connection._pool = this;
-      return connection;
-    })
+    this.options = { connectionLimit: 8, connectionWait: 1000, ...options };
+    this.pool = new GenericPool(
+      () => {
+        const connection = new _Connection(this.options);
+        connection._pool = this;
+        return connection;
+      },
+      this.options.connectionLimit,
+      this.options.connectionLimit
+    );
     this.database = options.database;
   }
 
@@ -155,7 +165,7 @@ type GenericCommandResult = {
   affectedRowCount: number;
 };
 
-type GenericRow = { [key: string]: number | string | Buffer | null }
+type GenericRow = { [key: string]: number | string | Buffer | null };
 
 export type GenericQueryResult = GenericCommandResult | Array<GenericRow>;
 
@@ -165,11 +175,14 @@ type GenericError = {
 };
 
 type GenericConnection = {
-  query: (query: string, callback: (error: GenericError | null, result?: GenericQueryResult) => void) => void;
+  query: (
+    query: string,
+    callback: (error: GenericError | null, result?: GenericQueryResult) => void
+  ) => void;
   close: () => void;
 };
 
-type Driver = { Connection: { new(connStr: string): GenericConnection } }
+type Driver = { Connection: { new (connStr: string): GenericConnection } };
 
 export class QueryRecord {
   query: string;
@@ -185,7 +198,6 @@ export class QueryRecord {
     this.endTime = new Date();
   }
 }
-
 
 export class QueryHistory {
   records: QueryRecord[];
@@ -204,7 +216,7 @@ export class QueryHistory {
   }
 
   last() {
-    return this.records.length > 0 ? this.records[this.records.length - 1] : null
+    return this.records.length > 0 ? this.records[this.records.length - 1] : null;
   }
 }
 
@@ -218,9 +230,9 @@ class _Connection extends Connection {
   queryCounter: QueryCounter = new QueryCounter();
   history: QueryHistory;
 
-  constructor(options: { driver: string, database: string }) {
+  constructor(options: { driver: string; database: string }) {
     super();
-    const driver = options.driver || process.env['SQLEX_DRIVER'] || './lib/mydb'
+    const driver = options.driver || process.env['SQLEX_DRIVER'] || './lib/mydb';
     this.driver = require(driver);
     this.connection = new this.driver.Connection('sqlite3://' + options.database);
     this.database = options.database;
@@ -241,14 +253,15 @@ class _Connection extends Connection {
     const record = this.history.push(sql);
     return new Promise((resolve, reject) => {
       this.connection.query(sql, (error, result) => {
-        record.close(error)
+        record.close(error);
         if (error) {
           reject(error);
-        }
-        else if (/^\s*insert\s/i.test(sql) && typeof (result as GenericCommandResult).insertId === 'number') {
+        } else if (
+          /^\s*insert\s/i.test(sql) &&
+          typeof (result as GenericCommandResult).insertId === 'number'
+        ) {
           resolve((result as GenericCommandResult).insertId);
-        }
-        else {
+        } else {
           resolve(result);
         }
       });
@@ -278,14 +291,14 @@ export default {
   },
   createConnection: (options): Connection => {
     return new _Connection(options);
-  }
+  },
 };
 
 export function logError(error: any) {
   if (typeof error !== 'string') {
     error = JSON.stringify(error, null, 4);
   }
-  process.stderr.write("Error: " + error);
+  process.stderr.write('Error: ' + error);
   if (!error.endsWith('\n')) {
     process.stderr.write('\n');
   }

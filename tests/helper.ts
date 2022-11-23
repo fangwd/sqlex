@@ -299,7 +299,7 @@ export function createTestConnectionPool(name: string, poolSize?: number): Conne
     password: DB_PASS,
     database: database,
     timezone: 'Z',
-    connectionLimit: poolSize || (DB_TYPE === 'sqlite3' ? 1 : 10)
+    connectionLimit: poolSize || (DB_TYPE === 'sqlite3' || DB_TYPE === 'generic' ? 1 : 10),
   });
 }
 
