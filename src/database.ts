@@ -1336,8 +1336,9 @@ export class Table {
         const record = this.recordMap[uc.name()][value];
         if (record) {
           if (existing && existing !== record) {
-            console.error("Existing:", existing.__data);
-            console.error("Current:", record.__data);
+            console.error("Key:", uc.name(), value)
+            console.error("Record A:", existing.__data);
+            console.error("Record B:", record.__data);
             throw Error(`Inconsistent unique constraint values in table ${this.name}`);
           }
           existing = record;
