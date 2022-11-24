@@ -862,6 +862,51 @@
           "columns": ["id"]
         }
       ]
+    },
+    {
+      "name": "employee",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INT",
+          "autoIncrement": true
+        },
+        {
+          "name": "code",
+          "type": "VARCHAR(60)",
+          "nullable": false
+        },
+        {
+          "name": "ecode",
+          "type": "VARCHAR(60)"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(60)"
+        }
+      ],
+      "constraints": [
+        {
+          "primaryKey": true,
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uk_employee",
+          "unique": true,
+          "columns": [
+            "code"
+          ]
+        },
+        {
+          "name": "uk_employee2",
+          "unique": true,
+          "columns": [
+            "ecode"
+          ]
+        }
+      ]
     }
   ]
 }

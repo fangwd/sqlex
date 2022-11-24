@@ -167,3 +167,12 @@ create table service_log(
   customer_email varchar(60),
   service_time datetime
 );
+
+create table employee (
+  id integer primary key auto_increment,
+  code varchar(60) not null,
+  ecode varchar(60),
+  name varchar(60),
+  constraint uk_employee unique (code),
+  constraint uk_employee2 unique (ecode)
+);
