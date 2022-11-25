@@ -50,3 +50,5 @@ export { datetimeToString, dateToString, timeToString, isPlainObject, pluralise,
 export { Schema, Model } from './schema';
 
 export type PlainDataObject = Document;
+
+export const VERSION = require('../package.json').version;
