@@ -321,7 +321,7 @@ export class Model {
     }
 
     if (!this.primaryKey) {
-      throw Error(`No primary key defined: ${this.table.name}`);
+      console.warn(`WARN: No primary key defined: ${this.table.name}`);
     }
   }
 
