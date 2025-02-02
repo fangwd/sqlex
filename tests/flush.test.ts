@@ -2,7 +2,7 @@ import { Schema } from '../src/schema';
 import { Database } from '../src/database';
 import { Record } from '../src/record';
 
-import helper = require('./helper');
+import * as helper from './helper';
 
 const NAME = 'flush';
 
@@ -11,7 +11,7 @@ afterAll(() => helper.dropDatabase(NAME));
 
 test('append', () => {
   const schema = new Schema(helper.getExampleData());
-  const db = new Database(null, schema);
+  const db = new Database(null as any, schema);
   const user = db.append('user', { email: 'user@example.com' });
   const user2 = db.append('user', { email: 'user@example.com' });
   expect(user).toBe(user2);
@@ -25,7 +25,7 @@ test('append', () => {
 
 test('append #2', () => {
   const schema = new Schema(helper.getExampleData());
-  const db = new Database(null, schema);
+  const db = new Database(null as any , schema);
   const user = db.getModels().User({ email: 'user@example.com' });
   expect(user instanceof Record).toBe(true);
   expect(user.email).toBe('user@example.com');
@@ -35,7 +35,7 @@ test('append #2', () => {
   db.end();
 });
 
-test('delete', async done => {
+test('delete', async () => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const table = db.table('user');
@@ -43,14 +43,12 @@ test('delete', async done => {
   const row = await table.get({ id });
   expect(row.email).toBe('deleted@example.com');
   const record = db.getModels().User({ email: 'deleted@example.com' });
-  record.delete().then(async () => {
-    expect(await table.get({ id })).toBe(undefined);
-    db.end();
-    done();
-  });
+  await record.delete();
+  expect(await table.get({ id })).toBe(undefined);
+  await db.end();
 });
 
-test('update', async done => {
+test('update', async () => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const table = db.table('user');
@@ -60,11 +58,10 @@ test('update', async done => {
   const user = db.getModels().User({ email: 'updated@example.com' });
   await user.update({ status: 200 });
   expect((await table.get({ id })).status).toBe(200);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('save #1', async done => {
+test('save #1', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const user = db.getModels().User({ email: 'saved01@example.com' });
@@ -72,12 +69,11 @@ test('save #1', async done => {
     expect(row.email).toBe('saved01@example.com');
     const user = await db.table('user').get({ email: 'saved01@example.com' });
     expect(user.id).toBe(row.id);
-    db.end();
-    done();
+    await db.end();
   });
 });
 
-test('save #2', async done => {
+test('save #2', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const models = db.getModels();
@@ -88,18 +84,17 @@ test('save #2', async done => {
   await order.save();
   const saved2 = await db.table('order').get({ code: 'saved02' });
   expect((saved2.user as any).id).toBe(saved.id);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('save #3', done => {
+test('save #3', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const models = db.getModels();
   const user = models.User({ email: 'saved03@example.com' });
   const order_1 = models.Order({ code: 'saved03-1', user });
   const order_2 = models.Order({ code: 'saved03-2', user });
-  Promise.all([order_1.save(), order_2.save()]).then(async () => {
+  await Promise.all([order_1.save(), order_2.save()]).then(async () => {
     const saved_0 = await db
       .table('user')
       .get({ email: 'saved03@example.com' });
@@ -107,12 +102,11 @@ test('save #3', done => {
     const saved_2 = await db.table('order').get({ code: 'saved03-1' });
     expect((saved_1.user as any).id).toBe(saved_0.id);
     expect((saved_2.user as any).id).toBe(saved_0.id);
-    db.end();
-    done();
   });
+  await db.end();
 });
 
-test('save #4', async done => {
+test('save #4', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const models = db.getModels();
@@ -128,11 +122,10 @@ test('save #4', async done => {
   expect((saved_1.user as any).id).toBe(saved_0.id);
   expect((saved_2.user as any).id).toBe(saved_0.id);
   expect(saved_0.status).toBe(saved_2.id);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('save #5', async done => {
+test('save #5', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const User = db.getModels().User;
@@ -141,16 +134,15 @@ test('save #5', async done => {
   promises.push(User({ email }).save());
   promises.push(User({ email, status: 200 }).save());
   promises.push(User({ email }).save());
-  Promise.all(promises).then(async () => {
+  await Promise.all(promises).then(async () => {
     const user = await db.table('user').get({ email });
     expect(user.email).toBe(email);
     expect(user.status).toBe(200);
-    db.end();
-    done();
   });
+  await db.end();
 });
 
-test('flush #1', async done => {
+test('flush #1', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const table = db.table('category');
@@ -186,30 +178,29 @@ test('flush #1', async done => {
     expect(rows[5].__state.merged).toBe(rows[2]);
     let rec = await table.get({ id: rows[2].id });
     expect(rec.name).toBe('Child 1');
-    db.end();
-    done();
   });
+  await db.end();
 });
 
-test('flush #2', async done => {
+test('flush #2', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
-  const user = db.table('user').append();
+  let user = db.table('user').append();
   user.email = 'random';
-  const order = db.table('order').append({ code: 'random' });
+  let order = db.table('order').append({ code: 'random' });
   order.user = user;
   user.status = order;
 
-  db.flush().then(async () => {
-    const user = await db.table('user').get({ email: 'random' });
-    const order = await db.table('order').get({ code: 'random' });
-    expect(user.status).toBe(order.id);
-    db.end();
-    done();
-  });
+  await db.flush();
+
+  user = await db.table('user').get({ email: 'random' });
+  order = await db.table('order').get({ code: 'random' });
+  expect(user.status).toBe(order.id);
+
+  await db.end();
 });
 
-test('flush #3', async done => {
+test('flush #3', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const email = helper.getId();
@@ -233,8 +224,11 @@ test('flush #3', async done => {
   order2.user = user2;
   user3.status = order2;
 
-  db.flush().then(async ({ connection }) => {
-    expect(connection.queryCounter.total).toBe(10);
+  const { connection } = await db.flush();
+
+  expect(connection.queryCounter.total).toBe(10);
+
+  {
     const user = await db.table('user').get({ email });
     const order = await db.table('order').get({ code });
     expect((order.user as any).id).toBe(user.id);
@@ -243,14 +237,14 @@ test('flush #3', async done => {
     const order2 = await db.table('order').get({ code: code2 });
     expect(user3.status).toBe(order2.id);
     expect((order2.user as any).id).toBe(user.id);
-    db.end();
-    done();
-  });
+  }
+
+  await db.end();
 });
 
-test('flush #4', async done => {
+test('flush #4', async() => {
   if (process.env.DB_TYPE === 'sqlite3') {
-    return done();
+    return;
   }
 
   const schema = new Schema(helper.getExampleData());
@@ -293,7 +287,7 @@ test('flush #4', async done => {
 
   const promises = dbs.map(db => db.flush());
 
-  Promise.all(promises).then(async () => {
+  await Promise.all(promises).then(async () => {
     const db = helper.connectToDatabase(NAME, schema);
     const users = await db.table('user').select('*');
     const orders = await db.table('order').select('*');
@@ -310,13 +304,14 @@ test('flush #4', async done => {
       ok = ok && user.status === order.id;
     }
     expect(ok).toBe(true);
-    db.end();
-    dbs.forEach(db => db.end());
-    done();
+    await db.end();
+    for (const db of dbs) {
+      await db.end();
+    }
   });
 });
 
-test('flush #5', async done => {
+test('flush #5', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const order = db.table('order').append({ code: helper.getId() });
@@ -325,11 +320,12 @@ test('flush #5', async done => {
     order.dateCreated = '23-06-2017';
   } catch (error) {
     expect(/Invalid time value/.test(error.message)).toBe(true);
-    db.flush().then(() => { done(); db.end(); });
+    await db.flush();
   }
+  await db.end();
 });
 
-test('flush #6', async done => {
+test('flush #6', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
 
@@ -365,12 +361,10 @@ test('flush #6', async done => {
   user = await db.table('user').get({ email: email4 });
   expect(user.lastName).toBe('name-4');
 
-  db.end();
-
-  done();
+  await db.end();
 });
 
-test('afterBegin', async done => {
+test('afterBegin', async() => {
   const db = helper.connectToDatabase(NAME);
 
   const title = 'Example Post';
@@ -412,11 +406,11 @@ test('afterBegin', async done => {
   if (!helper.isSqlite3()) {
     expect(!!comments.find(c => c.id === deleted.id)).toBe(false);
   }
-  db.end();
-  done();
+
+  await db.end();
 });
 
-test('beforeCommit', async done => {
+test('beforeCommit', async() => {
   const db = helper.connectToDatabase(NAME);
 
   const title = 'Example Post';
@@ -458,11 +452,10 @@ test('beforeCommit', async done => {
   expect(comments.length).toBe(2);
   expect(!!comments.find(c => c.id === comment.id)).toBe(true);
   expect(!!comments.find(c => c.id === deleted.id)).toBe(false);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('replaceRecordsIn (1)', async done => {
+test('replaceRecordsIn (1)', async() => {
   const db = helper.connectToDatabase(NAME);
 
   const alice = db.append('user', { email: 'alice' });
@@ -502,7 +495,7 @@ test('replaceRecordsIn (1)', async done => {
 
   expect(aliceItems.length).toBe(4);
 
-  expect(aliceItems.find(item => (item.product as any).id === 3).quantity).toBe(
+  expect(aliceItems.find(item => (item.product as any).id === 3)!.quantity).toBe(
     4
   );
 
@@ -512,11 +505,10 @@ test('replaceRecordsIn (1)', async done => {
 
   expect(bobItems.length).toBe(3);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('replaceRecordsIn (2)', async done => {
+test('replaceRecordsIn (2)', async() => {
   const db = helper.connectToDatabase(NAME);
 
   let alice = db.append('user', { email: 'alice' });
@@ -565,7 +557,7 @@ test('replaceRecordsIn (2)', async done => {
 
   expect(aliceItems.length).toBe(3);
 
-  expect(aliceItems.find(item => (item.product as any).id === 3).quantity).toBe(
+  expect(aliceItems.find(item => (item.product as any).id === 3)!.quantity).toBe(
     4
   );
 
@@ -580,17 +572,16 @@ test('replaceRecordsIn (2)', async done => {
     .select('*', { where: { order: { code_like: 'bob-b%' } } });
 
   expect(bobItems.length).toBe(0);
-  db.end();
-  done();
+  await db.end();
 });
 
 function createTestPosts(db: Database, user) {
-  const allPosts = [];
-  const allComments = [];
+  const allPosts: Record[] = [];
+  const allComments: any[] = [];
 
   for (let i = 0; i < 4; i++) {
     const post = db.table('post').append({ title: '', user });
-    const comments = [];
+    const comments: Record[] = [];
     comments.push(
       db.table('comment').append({ post, parent: null, content: '' })
     );
@@ -615,7 +606,7 @@ function createTestPosts(db: Database, user) {
   return [allPosts, allComments];
 }
 
-test('replaceRecordsIn (3)', async done => {
+test('replaceRecordsIn (3)', async() => {
   const db = helper.connectToDatabase(NAME);
 
   let user = db.append('user', { email: 'alice' });
@@ -759,11 +750,10 @@ test('replaceRecordsIn (3)', async done => {
     expect(comments.length).toBe(4);
     expect((comments[3].parent as any).id).toBe(comments[2].id);
   }
-  db.end();
-  done();
+  await db.end();
 });
 
-test('replaceRecordsIn (4)', async done => {
+test('replaceRecordsIn (4)', async() => {
   const db = helper.connectToDatabase(NAME);
 
   let user = db.append('user', { email: 'alice2' });
@@ -792,6 +782,5 @@ test('replaceRecordsIn (4)', async done => {
     .select('*', { where: { post: posts[1].id } });
 
   expect(comments.length).toBe(8);
-  db.end();
-  done();
+  await db.end();
 });

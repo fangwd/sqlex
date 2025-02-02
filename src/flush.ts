@@ -133,7 +133,7 @@ function _persist(connection: Connection, record: Record): Promise<Record> {
 
   if (method === FlushMethod.UPDATE) {
     return record.__table._update(connection, fields, filter).then(result => {
-      if (result.affectedRowCount > 0) {
+      if ((result.affectedRowCount || result.affectedRows) > 0) {
         record.__remove_dirty(Object.keys(fields));
         return record;
       }

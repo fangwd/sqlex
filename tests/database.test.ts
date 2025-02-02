@@ -26,7 +26,7 @@ const OPTIONS = {
   ]
 };
 
-test('select', done => {
+test('select', async() => {
   expect.assertions(2);
 
   const db = helper.connectToDatabase(NAME);
@@ -38,115 +38,85 @@ test('select', done => {
     offset: 1,
     limit: 1
   };
-  db.table('product')
-    .select('*', options)
-    .then(rows => {
-      expect(rows.length).toBe(1);
-      expect((rows[0].name as string).indexOf('Australian')).toBe(0);
-      db.end();
-      done();
-    });
+  const rows = await db.table('product').select('*', options);
+  expect(rows.length).toBe(1);
+  expect((rows[0].name as string).indexOf('Australian')).toBe(0);
+  await db.end();
 });
 
-test('insert', done => {
+test('insert', async() => {
   expect.assertions(2);
 
   const db = helper.connectToDatabase(NAME);
-  db.table('category')
-    .insert({ name: 'Frozen' })
-    .then(id => {
-      expect(id).toBeGreaterThan(0);
-      db.table('category')
-        .select('*', { where: { name: 'Frozen' } })
-        .then(rows => {
-          expect(rows.length).toBe(1);
-          db.end();
-          done();
-        });
-    });
+  const id = await db.table('category').insert({ name: 'Frozen' });
+  expect(id).toBeGreaterThan(0);
+  const rows = await db.table('category').select('*', { where: { name: 'Frozen' } });
+  expect(rows.length).toBe(1);
+  await db.end();
 });
 
-test('update', done => {
+test('update', async() => {
   expect.assertions(3);
 
   const db = helper.connectToDatabase(NAME);
-  db.table('category')
-    .insert({ name: 'Ice' })
-    .then(id => {
-      expect(id).toBeGreaterThan(0);
-      db.table('category')
-        .update({ name: 'Ice Cream' }, { name: 'Ice' })
-        .then(() => {
-          db.table('category')
-            .select('*', { where: { id } })
-            .then(rows => {
-              expect(rows.length).toBe(1);
-              expect(rows[0].name).toBe('Ice Cream');
-              db.end();
-              done();
-            });
-        });
-    });
+  const id = await db.table('category').insert({ name: 'Ice' });
+  expect(id).toBeGreaterThan(0);
+  await db.table('category').update({ name: 'Ice Cream' }, { name: 'Ice' });
+  const rows = await db.table('category').select('*', { where: { id } });
+  expect(rows.length).toBe(1);
+  expect(rows[0].name).toBe('Ice Cream');
+  await db.end();
 });
 
-test('get success', done => {
+test('get success', async() => {
   expect.assertions(1);
 
   const db = helper.connectToDatabase(NAME);
   const table = db.table('user');
-  table
+  const row = await table
     .get({
       email: 'alice@example.com',
       firstName: 'Alice'
-    })
-    .then(row => {
-      const lastName = row.lastName;
-      table.get(row.id as Value).then(row => {
-        expect(row.lastName).toBe(lastName);
-        db.end();
-        done();
-      });
     });
+
+  const row2 = await table.get(row.id as Value);
+  expect(row2.lastName).toBe(row.lastName);
+  await db.end();
 });
 
-test('get fail', done => {
-  expect.assertions(1);
+test('get fail', async() => {
 
   const db = helper.connectToDatabase(NAME);
   const table = db.table('user');
-  table
-    .get({
-      firstName: 'Alice'
-    })
-    .catch(reason => {
-      expect(!!/Bad/i.test(reason)).toBe(true);
-      db.end();
-      done();
-    });
+  let reason = '';
+  try {
+    await table.get({ firstName: 'Alice' })
+  }
+  catch (error) {
+    reason = error;
+  }
+  expect(!!/Bad/i.test(reason)).toBe(true);
+  await db.end();
 });
 
-test('create with connect', done => {
+test('create with connect', async() => {
   expect.assertions(1);
 
   const ID = 1;
 
   const db = helper.connectToDatabase(NAME);
   const table = db.table('order');
-  table
+  const order = await table
     .create({
       user: { connect: { email: 'alice@example.com' } },
       code: `test-order-${ID}`
     })
-    .then(order => {
-      table.db
-        .table('user')
-        .get({ email: 'alice@example.com' })
-        .then(user => {
-          expect((order.user as any).id).toBe(user.id);
-          db.end();
-          done();
-        });
-    });
+  const user = await table.db
+    .table('user')
+    .get({ email: 'alice@example.com' })
+  expect((order.user as any).id).toBe(user.id);
+  await db.end();
+
 });
 
 // upsert without update should create or return the existing row
@@ -219,7 +189,7 @@ test('upsert #2', done => {
   });
 });
 
-test('update related', async done => {
+test('update related', async() => {
   expect.assertions(14);
 
   const table = helper.connectToDatabase(NAME).table('category');
@@ -372,11 +342,10 @@ test('update related', async done => {
   rows = await table.select('*');
   expect(rows.find(r => r.name === 'Apple').parent).toBe(null);
   expect(rows.find(r => r.name === 'Banana').parent).toBe(null);
-  table.db.end();
-  done();
+  await table.db.end();
 });
 
-test('many to many - connect/create', async done => {
+test('many to many - connect/create', async() => {
   expect.assertions(3);
 
   const schema = new Schema(helper.getExampleData(), OPTIONS);
@@ -440,11 +409,10 @@ test('many to many - connect/create', async done => {
 
   expect(rows.length).toBe(3);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('many to many - upsert', async done => {
+test('many to many - upsert', async() => {
   expect.assertions(3);
 
   const test = 'upsert';
@@ -505,11 +473,10 @@ test('many to many - upsert', async done => {
 
   expect(rows.length).toBe(2);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('many to many - update', async done => {
+test('many to many - update', async() => {
   expect.assertions(4);
 
   const test = 'update';
@@ -604,11 +571,10 @@ test('many to many - update', async done => {
 
   expect(rows.length).toBe(2);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('many to many - delete', async done => {
+test('many to many - delete', async() => {
   expect.assertions(4);
 
   const test = 'delete';
@@ -690,11 +656,10 @@ test('many to many - delete', async done => {
 
   expect(rows.length).toBe(0);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('many to many - disconnect', async done => {
+test('many to many - disconnect', async() => {
   expect.assertions(4);
 
   const test = 'disconnect';
@@ -783,8 +748,7 @@ test('many to many - disconnect', async done => {
 
   expect(rows.length).toBe(1);
 
-  db.end();
-  done();
+  await db.end();
 });
 
 test('append', () => {
@@ -819,7 +783,7 @@ test('append #2', async () => {
   db.end();
 });
 
-test('claim', async done => {
+test('claim', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('order');
 
@@ -841,7 +805,7 @@ test('claim', async done => {
     promises.push(table.claim(filter, update));
   }
 
-  Promise.all(promises).then(async rows => {
+  await Promise.all(promises).then(async rows => {
     expect(rows.length).toBe(THREAD_COUNT);
     const empty = rows.filter(row => row === null);
     expect(empty.length).toBe(1);
@@ -849,8 +813,7 @@ test('claim', async done => {
     expect(rows.length).toBe(0);
     rows = await table.select('*', { where: { ...filter, ...update } });
     expect(rows.length).toBe(ROW_COUNT);
-    db.end();
-    done();
+    await db.end();
   });
 });
 
@@ -915,7 +878,7 @@ describe('db.select', () => {
       raw: true,
     };
     const rows = await db.select(options);
-    expect(rows[0].yearCreated).toBe(2018);
+    expect(+(rows[0].yearCreated as string)).toBe(2018);
     db.end();
   });
 });

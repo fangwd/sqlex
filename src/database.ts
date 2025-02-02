@@ -225,7 +225,7 @@ export class Database {
     }
     if (!connection) {
       connection = await this.pool.getConnection();
-      const result = connection._query(query);
+      const result = await connection._query(query);
       connection.release();
       return result;
     }

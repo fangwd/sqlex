@@ -39,9 +39,7 @@ from product p
   join `order` o on o.id=oi.order_id
   join user u on u.id=o.user_id;
 */
-test('example query', done => {
-  expect.assertions(2);
-
+test('example query', async() => {
   const db = helper.connectToDatabase(NAME);
   const args = {
     email: 'grace@example.com',
@@ -56,14 +54,10 @@ test('example query', done => {
     }
   };
 
-  db.table('user')
-    .select('*', { where: args })
-    .then(rows => {
-      expect(rows.length).toBe(1);
-      expect(rows[0].email).toBe(args.email);
-      db.end();
-      done();
-    });
+  const rows = await db.table('user').select('*', { where: args });
+  expect(rows.length).toBe(1);
+  expect(rows[0].email).toBe(args.email);
+  await db.end();
 });
 
 test('ilike', async ()=> {
@@ -73,7 +67,7 @@ test('ilike', async ()=> {
   }
   const rows = await db.table('group').select('*', {where:  {name_ilike: 'adm%'}});
   expect(rows.length).toBe(1);
-  db.end();
+  await db.end();
 });
 
 test('foreign key column filter', () => {
@@ -110,9 +104,7 @@ from product_category pc
   join category c on c.id=pc.category_id
 order by c.name;
 */
-test('many to many', done => {
-  expect.assertions(2);
-
+test('many to many', async () => {
   const options = {
     models: [
       {
@@ -144,35 +136,25 @@ test('many to many', done => {
   };
 
   const db = helper.connectToDatabase(NAME, domain);
-  db.table('category')
-    .select('*', { where: args })
-    .then(rows => {
-      expect(rows.length).toBe(1);
-      expect(rows[0].name).toBe('Fruit');
-      db.end();
-      done();
-    });
+  const rows = await db.table('category').select('*', { where: args });
+
+  expect(rows.length).toBe(1);
+  expect(rows[0].name).toBe('Fruit');
+
+  await db.end();
 });
 
-test('and', done => {
-  expect.assertions(2);
-
+test('and', async() => {
   const db = helper.connectToDatabase(NAME);
   const args = { and: [{ name_like: '%Apple%' }, { price_lt: 6 }] };
 
-  db.table('product')
-    .select('*', { where: args })
-    .then(rows => {
-      expect(rows.length).toBe(1);
-      expect(rows[0].name).toBe('Australian Apple');
-      db.end();
-      done();
-    });
+  const rows = await db.table('product').select('*', { where: args });
+  expect(rows.length).toBe(1);
+  expect(rows[0].name).toBe('Australian Apple');
+  await db.end();
 });
 
-test('or', done => {
-  expect.assertions(1);
-
+test('or', async() => {
   const db = helper.connectToDatabase(NAME);
   const args = {
     or: [
@@ -182,18 +164,12 @@ test('or', done => {
       }
     ]
   };
-  db.table('product')
-    .select('*', { where: args })
-    .then(rows => {
-      expect(rows.length).toBe(4);
-      db.end();
-      done();
-    });
+  const rows = await db.table('product').select('*', { where: args });
+  expect(rows.length).toBe(4);
+  await db.end();
 });
 
-test('not', done => {
-  expect.assertions(1);
-
+test('not', async() => {
   const db = helper.connectToDatabase(NAME);
   const args = {
     and: [
@@ -209,13 +185,9 @@ test('not', done => {
     ]
   };
 
-  db.table('product')
-    .select('*', { where: args })
-    .then(rows => {
-      expect(rows.length).toBe(2);
-      db.end();
-      done();
-    });
+  const rows = await db.table('product').select('*', { where: args });
+  expect(rows.length).toBe(2);
+  await db.end();
 });
 
 test('order by', () => {
@@ -238,7 +210,7 @@ test('throughField', async () => {
   ];
   const rows = await db.table('category_tree').select('*', { where: args });
   expect(rows.length).toBeGreaterThan(0);
-  db.end();
+  await db.end();
 });
 
 test('empty result', async () => {
@@ -254,7 +226,7 @@ test('empty result', async () => {
   );
   expect(rows.length).toBe(0);
   connection.release();
-  db.end();
+  await db.end();
 });
 
 test('plainify', () => {
@@ -279,7 +251,7 @@ test('group by', async () => {
   expect((rows[0] as any).itemCount > 0);
   expect((rows[1] as any).totalQuantity > 0);
   connection.release();
-  db.end();
+  await db.end();
 });
 
 describe('notIn', () => {
@@ -291,7 +263,7 @@ describe('notIn', () => {
     const rows = await db.table('group').select('*', { where: args });
     expect(rows.length).toBe(1);
     expect(rows[0].name).toBe('CUSTOMER');
-    db.end();
+    await db.end();
   });
   test('should filter using primary key', async () => {
     const db = helper.connectToDatabase(NAME);
@@ -301,7 +273,7 @@ describe('notIn', () => {
     const rows = await db.table('group').select('*', { where: args });
     expect(rows.length).toBe(1);
     expect(rows[0].name).toBe('CUSTOMER');
-    db.end();
+    await db.end();
   });
 });
 
@@ -314,7 +286,7 @@ describe('not null', () => {
     const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
     expect(rows.length).toBe(2);
     expect(rows[0].content).toBe('comment 1');
-    db.end();
+    await db.end();
   });
 
   test('should work for foreign keys', async () => {
@@ -325,7 +297,7 @@ describe('not null', () => {
     const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
     expect(rows.length).toBe(2);
     expect(rows[0].content).toBe('comment 2');
-    db.end();
+    await db.end();
   });
 });
 
@@ -337,7 +309,7 @@ describe('having', () => {
       having: { itemCount_gt: 2 },
     });
     expect(+rows[0].itemCount).toBeGreaterThan(2);
-    db.end();
+    await db.end();
   });
   test('filter on aggregate values and grouped by values', async () => {
     const db = helper.connectToDatabase(NAME);
@@ -357,7 +329,7 @@ describe('having', () => {
     });
     expect(rows2.length).toBe(1);
     expect(rows2[0].name).toContain('Banana');
-    db.end();
+    await db.end();
   });
 });
 
@@ -367,7 +339,7 @@ test('through field', async () => {
     where: { product: { categories_exists: { name_like: '%Apple' } } },
   });
   expect(rows.length).toBe(3);
-  db.end();
+  await db.end();
 });
 
 test('virtual foreign key', async () => {
@@ -384,7 +356,7 @@ test('virtual foreign key', async () => {
     customerEmail: 'alice@example.com',
     serviceTime: new Date()
   });
-  const rows = await db.table('service_log').select(
+  const rows = await db.table('service_log').select<any>(
     {
       customerEmail: '*',
       productCode: '*',
@@ -396,7 +368,7 @@ test('virtual foreign key', async () => {
   expect(rows.length).toBe(1);
   expect(rows[0].productCode.status).toBe(1);
   expect(rows[0].customerEmail.email).toBe('alice@example.com');
-  db.end();
+  await db.end();
 });
 
 const DefaultEscape : DialectEncoder = {

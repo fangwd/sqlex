@@ -10,6 +10,7 @@ import {
 
 import { Schema } from '../src/schema';
 import { Database } from '../src/database';
+import { datetimeToString } from '../src/utils';
 
 export const DB_TYPE = process.env.DB_TYPE || 'mysql';
 const DB_HOST = process.env.DB_HOST || 'localhost';
@@ -123,7 +124,7 @@ export async function createPostgresDatabase(
         .replace(/\buser\b/g, '"user"')
         .replace(/`/g, '"')
         .replace(/integer primary key auto_increment/, 'serial primary key')
-        .replace(/('\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z')/g, '$1::timestamptz')
+        .replace(/'(\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z)'/g, (_, ts) => `'${datetimeToString(new Date(ts))}'`)
     );
 
   for (const line of lines) {
@@ -155,7 +156,7 @@ export async function dropPostgresDatabase(name: string): Promise<void> {
 }
 
 function createMySQLDatabase(name: string, data = true): Promise<any> {
-  const mysql = require('mysql');
+  const mysql = require('mysql2');
   const database = `${DB_NAME}_${name}`;
 
   const db = mysql.createConnection({
@@ -186,7 +187,7 @@ function createMySQLDatabase(name: string, data = true): Promise<any> {
 }
 
 function dropMySQLDatabase(name: string): Promise<void> {
-  const mysql = require('mysql');
+  const mysql = require('mysql2');
   const database = `${DB_NAME}_${name}`;
 
   const db = mysql.createConnection({
