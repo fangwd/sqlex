@@ -171,14 +171,13 @@ test('flush #1', async() => {
   expect(table.recordList.length).toBe(6);
   expect(table.recordList[1].__dirty()).toBe(true);
 
-  db.flush().then(async () => {
-    const rows = table.recordList;
-    expect(rows[3].__state.merged).toBe(null);
-    expect(rows[4].__state.merged).toBe(rows[1]);
-    expect(rows[5].__state.merged).toBe(rows[2]);
-    let rec = await table.get({ id: rows[2].id });
-    expect(rec.name).toBe('Child 1');
-  });
+  await db.flush();
+  const rows = table.recordList;
+  expect(rows[3].__state.merged).toBe(null);
+  expect(rows[4].__state.merged).toBe(rows[1]);
+  expect(rows[5].__state.merged).toBe(rows[2]);
+  let rec = await table.get({ id: rows[2].id });
+  expect(rec.name).toBe('Child 1');
   await db.end();
 });
 
