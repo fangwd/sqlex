@@ -1,13 +1,13 @@
 import { SimpleField } from '../src/schema';
 
-import helper = require('./helper');
+import * as helper from './helper';
 
 const NAME = 'example';
 
 beforeAll(() => helper.createDatabase(NAME));
 afterAll(() => helper.dropDatabase(NAME));
 
-test('query', async done => {
+test('query', async() => {
   const { User, OrderItem, Category } = helper
     .connectToDatabase(NAME)
     .getModels();
@@ -105,12 +105,10 @@ test('query', async done => {
     expect(banana.products[0].title).toBe('Australian Banana');
   }
 
-  User.table.db.end();
-
-  done();
+  await User.table.db.end();
 });
 
-test('create', async done => {
+test('create', async() => {
   const db = helper.connectToDatabase(NAME);
 
   const { User, Post } = db.getModels();
@@ -129,11 +127,10 @@ test('create', async done => {
   expect(post.user.id).toBe(user.id);
   expect(user.firstPost.id).toBe(post.id);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('append #1', async done => {
+test('append #1', async() => {
   const db = helper.connectToDatabase(NAME);
   const title = 'Example Post #1';
 
@@ -145,11 +142,10 @@ test('append #1', async done => {
 
   expect(posts.length).toBe(1);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('append #2', async done => {
+test('append #2', async() => {
   const db = helper.connectToDatabase(NAME);
   const title = 'Example Post #2';
   const content = 'Example Comment #';
@@ -191,11 +187,10 @@ test('append #2', async done => {
 
   expect(replies.length).toBe(2);
 
-  db.end();
-  done();
+  await db.end();
 });
 
-test('select', async done => {
+test('select', async() => {
   const db = helper.connectToDatabase(NAME);
 
   const post = db.table('post').append({ title: '#3' });
@@ -221,6 +216,5 @@ test('select', async done => {
 
   expect(row.content).toBe('#.2');
 
-  db.end();
-  done();
+  await db.end();
 });

@@ -1,4 +1,3 @@
-import { isDate } from 'util';
 import { DialectEncoder } from './engine';
 import { Value } from './types';
 
@@ -162,7 +161,7 @@ function toString(value: Value, encoder: DialectEncoder) {
   if (Array.isArray(value)) {
     return value.map((entry) => toString(entry, encoder)).join(', ');
   }
-  if (isDate(value)) {
+  if (value instanceof Date) {
     return encoder.escapeDate(value);
   } else if (value === undefined || value === null) {
     return 'null';

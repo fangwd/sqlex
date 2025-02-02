@@ -1,4 +1,4 @@
-import helper = require('./helper');
+import * as helper from './helper';
 
 const NAME = 'datetime';
 

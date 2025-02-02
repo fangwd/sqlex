@@ -1,4 +1,4 @@
-import helper = require('./helper');
+import * as helper from './helper';
 import { Database } from '../src/database';
 
 const NAME = 'loader';
@@ -6,7 +6,7 @@ const NAME = 'loader';
 beforeAll(() => helper.createDatabase(NAME));
 afterAll(() => helper.dropDatabase(NAME));
 
-test('load rows', async done => {
+test('load rows', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('category');
 
@@ -57,11 +57,10 @@ test('load rows', async done => {
   }))[0];
 
   expect((row.parent as any).id).toBe(parentId);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('load attributes', async done => {
+test('load attributes', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('category');
 
@@ -103,11 +102,10 @@ test('load attributes', async done => {
   expect(rows[1].name).toBe('colour');
   expect(rows[1].value).toBe('Red');
   expect((rows[1].category as any).id).toBe(category.id);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('load with defaults', async done => {
+test('load with defaults', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('category');
 
@@ -213,11 +211,10 @@ test('load with defaults', async done => {
 
     expect((category2.parent as any).id).toBe(category.id);
   }
-  db.end();
-  done();
+  await db.end();
 });
 
-test('load many to many #1', async done => {
+test('load many to many #1', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('product');
 
@@ -263,11 +260,10 @@ test('load many to many #1', async done => {
   });
 
   expect(rows.length).toBe(2);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('select related', async done => {
+test('select related', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('order');
 
@@ -291,11 +287,10 @@ test('select related', async done => {
   expect(rows.length).toBe(2);
   expect((rows[0].user as any).orders.length).toBe(2);
   expect(rows[0].orderItems[0].product.categories.length).toBeGreaterThan(0);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('select rows', async done => {
+test('select rows', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('category');
 
@@ -313,11 +308,10 @@ test('select rows', async done => {
   expect(docs.length).toBe(count);
   expect(!!docs[count - 1].parent_name).toBe(true);
   expect(docs[count - 1].product_price).toBeGreaterThan(0);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('select rows with attributes', async done => {
+test('select rows with attributes', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('category');
 
@@ -354,11 +348,10 @@ test('select rows with attributes', async done => {
 
   expect(docs.length).toBe(count);
   expect(docs[count - 1]['my-name']).toBe(docs[count - 1].name);
-  db.end();
-  done();
+  await db.end();
 });
 
-test('load many to many #2', async done => {
+test('load many to many #2', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('user');
 
@@ -404,11 +397,10 @@ test('load many to many #2', async done => {
   for (const r of rows) {
     expect(r.status).toBe(300);
   }
-  db.end();
-  done();
+  await db.end();
 });
 
-test('load many to many #3', async done => {
+test('load many to many #3', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('product');
 
@@ -471,8 +463,7 @@ test('load many to many #3', async done => {
     expect((rows[0].parent as any).id).toBe(1);
     expect((rows[1].parent as any).id).toBeGreaterThan(1);
   }
-  db.end();
-  done();
+  await db.end();
 });
 
 async function getCategoryWithProductsRowCount(db: Database) {

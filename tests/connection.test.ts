@@ -248,7 +248,7 @@ test('pool', done => {
   });
 });
 
-test('getInformationSchema', async done => {
+test('getInformationSchema', async() => {
   const connection = helper.createTestConnection(NAME);
   if (!helper.isSqlite3(connection.dialect)) {
     const schemaInfo = await getInformationSchema(
@@ -264,6 +264,5 @@ test('getInformationSchema', async done => {
     expect(name.type).toBe('varchar');
     expect(name.size).toBe(200);
   }
-  connection.end();
-  done();
+  await connection.end();
 });

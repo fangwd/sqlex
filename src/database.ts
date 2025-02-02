@@ -225,7 +225,7 @@ export class Database {
     }
     if (!connection) {
       connection = await this.pool.getConnection();
-      const result = connection._query(query);
+      const result = await connection._query(query);
       connection.release();
       return result;
     }
@@ -1254,7 +1254,7 @@ export class Table {
         self
           .update(data, where)
           .then(result => {
-            if (result.affectedRowCount === 1) {
+            if ((result.affectedRowCount || result.affectedRows) === 1) {
               resolve(row);
             } else if (try_count++ < MAX_TRY) {
               setTimeout(_select, Math.random() * 1000);

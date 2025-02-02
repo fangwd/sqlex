@@ -225,9 +225,10 @@ describe('raw fields', () => {
       raw: true,
     });
     const rows = await db.query(sql);
-    expect(rows[0].yearCreated).toBe(2018);
-    db.end();
+    expect(+(rows[0].yearCreated as string)).toBe(2018);
+    await db.end();
   });
+
   test('conditional expressions', async () => {
     const db = helper.connectToDatabase(NAME);
     const model = db.model('product');
@@ -244,8 +245,8 @@ describe('raw fields', () => {
       { raw: true }
     );
     const rows = await db.query(sql);
-    expect(/^(Apple|Other)$/.test(rows[0].productType)).toBe(true);
-    db.end();
+    expect(/^(Apple|Other)$/.test(rows[0].productType as string)).toBe(true);
+    await db.end();
   });
 });
 
@@ -265,7 +266,7 @@ describe('smart join', () => {
     const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId'], {});
     const rows = await db.query(sql);
     expect(typeof rows[0].userEmail).toBe('string');
-    db.end();
+    await db.end();
   });
 
   test('join without alias', async () => {
@@ -305,6 +306,6 @@ describe('smart join', () => {
     const sql = builder.select(['oi.order.user.email as userEmail', 'oi.order.id as orderId'], {});
     const rows = await db.query(sql);
     expect(typeof rows[0].userEmail).toBe('string');
-    db.end();
+    await db.end();
   });
 });

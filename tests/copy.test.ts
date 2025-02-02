@@ -1,25 +1,21 @@
-import helper = require('./helper');
+import * as helper from './helper';
 
 const NAME = 'copy';
 
 beforeAll(() => helper.createDatabase(NAME));
 afterAll(() => helper.dropDatabase(NAME));
 
-test('copy', async done => {
+test('copy', async() => {
   const db = helper.connectToDatabase(NAME);
   const order = db.getModels().Order({ id: 1 });
   await order.copy({ code: 'order-1-copy' });
-  db.table('order')
-    .select({ orderItems: '*' }, { where: { code: 'order-1-copy' } })
-    .then(rows => {
-      expect(rows.length).toBe(1);
-      expect((rows[0].orderItems as []).length).toBe(2);
-      db.end();
-      done();
-    });
+  const rows = await db.table('order').select({ orderItems: '*' }, { where: { code: 'order-1-copy' } });
+  expect(rows.length).toBe(1);
+  expect((rows[0].orderItems as []).length).toBe(2);
+  await db.end();
 });
 
-test('replace', async done => {
+test('replace', async() => {
   const db = helper.connectToDatabase(NAME);
 
   if (helper.isSqlite3()) {
@@ -116,6 +112,5 @@ test('replace', async done => {
     expect(rows[0].quantity).toBe(100);
     expect(rows[2].quantity).toBe(500);
   }
-  db.end();
-  done();
+  await db.end();
 });

@@ -1,13 +1,12 @@
-import helper = require('./helper');
+import * as helper from './helper';
 import { Schema } from '../src/schema';
-import { Document } from '../src/types';
 
 const NAME = 'tree';
 
 beforeAll(() => helper.createDatabase(NAME, false));
 afterAll(() => helper.dropDatabase(NAME));
 
-test('create', async done => {
+test('create', async() => {
   const table = getDatabase().table('category');
 
   const root = await table.create({
@@ -46,12 +45,10 @@ test('create', async done => {
   rows = await table.getDescendants(apple.id);
   expect(rows.length).toBe(3);
 
-  table.db.end();
-
-  done();
+  await table.db.end();
 });
 
-test('update', async done => {
+test('update', async() => {
   const table = getDatabase().table('category');
 
   const data = [
@@ -83,12 +80,10 @@ test('update', async done => {
   rows = await table.getDescendants(node1_1);
   expect(rows.length).toBe(2);
 
-  table.db.end();
-
-  done();
+  await table.db.end();
 });
 
-test('delete', async done => {
+test('delete', async() => {
   const table = getDatabase().table('category');
 
   const data = [
@@ -112,8 +107,7 @@ test('delete', async done => {
   rows = await table.getDescendants(root.id);
   expect(rows.length).toBe(2);
 
-  table.db.end();
-  done();
+  await table.db.end();
 });
 
 function getDatabase() {

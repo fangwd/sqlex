@@ -1,4 +1,4 @@
-import helper = require('./helper');
+import * as helper from './helper';
 import { _ConnectionPool as Pool } from '../src/engine/sqlite3';
 
 const NAME = 'sqlite3';
@@ -45,9 +45,9 @@ test('pool', async () => {
   expect(pool.pool.length).toBe(2);
 });
 
-test('escape', async done => {
+test('escape', async() => {
   if (helper.DB_TYPE !== 'sqlite3') {
-    return done();
+    return;
   }
 
   const db = helper.connectToDatabase(NAME);
@@ -58,5 +58,5 @@ test('escape', async done => {
   const rows = await db.table('product').select('*', { where: { sku } });
   expect(rows.length).toBe(1);
   expect(rows[0].name).toBe(name);
-  done();
+  await db.end();
 });
