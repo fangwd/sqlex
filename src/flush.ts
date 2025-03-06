@@ -268,7 +268,7 @@ function _flushTable(
   function _select(): Promise<any> {
     if (filter.length === 0) return Promise.resolve();
     const fields = model.fields.filter(field => nameSet.has(field.name));
-    const columns = fields.map(field => (field as SimpleField).column.name);
+    const columns = fields.map(field => dialect.escapeId((field as SimpleField).column.name));
     const from = dialect.escapeId(model.table.name);
     const where = encodeFilter(filter.map(r => r.__filter()), table.model, dialect);
     const query = `select ${columns.join(',')} from ${from} where ${where}`;
