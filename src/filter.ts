@@ -148,7 +148,7 @@ export class QueryBuilder {
     if (!(model instanceof QueryBuilder)) {
       this.model = model;
       this.dialect = dialect as DialectEncoder;
-      this.operatorMap = {...DEFAULT_OPERATOR_MAP, ...operatorMap};
+      this.operatorMap = { ...DEFAULT_OPERATOR_MAP, ...operatorMap };
       this.context = new Context();
       if (model instanceof TableModel) {
         this.alias = model.table.name;
@@ -160,6 +160,9 @@ export class QueryBuilder {
             model: model.db.model(model.aliasMap[key]),
           };
         }
+      }
+      if (this.dialect.dialect !== 'postgres') {
+        this.operatorMap['ilike'] = 'like';
       }
     } else {
       this.parent = model;

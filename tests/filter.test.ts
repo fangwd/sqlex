@@ -62,9 +62,6 @@ test('example query', async() => {
 
 test('ilike', async ()=> {
   const db = helper.connectToDatabase(NAME);
-  if (helper.DB_TYPE !== 'postgres') {
-    db.operatorMap['ilike'] = 'like';
-  }
   const rows = await db.table('group').select('*', {where:  {name_ilike: 'adm%'}});
   expect(rows.length).toBe(1);
   await db.end();
