@@ -128,11 +128,19 @@ export class Model {
       }
     }
 
+    const fields: Field[] = [];
+
     for (const column of table.columns) {
       const config = this.getFieldConfig(column);
       const field = references[column.name]
         ? new ForeignKeyField(this, column, config)
         : new SimpleField(this, column, config);
+      fields.push(field);
+    }
+
+    this.resolveFieldNameConflicts(fields);
+
+    for (const field of fields) {
       this.addField(field);
     }
   }
@@ -344,7 +352,125 @@ export class Model {
     }
   }
 
+  private resolveFieldNameConflicts(fields: Field[]) {
+    const groups = new Map<string, Field[]>();
+    for (const field of fields) {
+      const items = groups.get(field.name);
+      if (items) {
+        items.push(field);
+      } else {
+        groups.set(field.name, [field]);
+      }
+    }
+
+    const winners = new Set<Field>();
+    for (const group of groups.values()) {
+      if (group.length === 1) {
+        winners.add(group[0]);
+        continue;
+      }
+
+      const explicit = group.filter(field => this.hasExplicitFieldName(field));
+      if (explicit.length === 1) {
+        winners.add(explicit[0]);
+      } else if (explicit.length > 1) {
+        for (const field of explicit) {
+          winners.add(field);
+        }
+      } else {
+        winners.add(this.preferredAutoFieldNameWinner(group));
+      }
+    }
+
+    const reserved = new Set<string>();
+    for (const field of fields) {
+      if (winners.has(field)) {
+        if (reserved.has(field.name) && !this.hasExplicitFieldName(field)) {
+          field.name = this.getUniqueAutoFieldName(field, reserved);
+        }
+        reserved.add(field.name);
+      }
+    }
+
+    for (const field of fields) {
+      if (!winners.has(field) && !this.hasExplicitFieldName(field)) {
+        field.name = this.getUniqueAutoFieldName(field, reserved);
+        reserved.add(field.name);
+      }
+    }
+  }
+
+  private preferredAutoFieldNameWinner(fields: Field[]) {
+    const simpleField = fields.find(
+      field =>
+        field instanceof SimpleField &&
+        !(field instanceof ForeignKeyField) &&
+        field.name === toCamelCase(field.column.name)
+    );
+    return simpleField || fields[0];
+  }
+
+  private hasExplicitFieldName(field: Field) {
+    if (field instanceof RelatedField) {
+      return !!field.config.relatedName;
+    }
+    if (field instanceof SimpleField) {
+      return !!field.config.name;
+    }
+    return true;
+  }
+
+  private getUniqueAutoFieldName(field: Field, reserved: Set<string>) {
+    const candidates = this.getAutoFieldNameCandidates(field);
+    for (const candidate of candidates) {
+      if (candidate && !reserved.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    const base =
+      candidates.find(candidate => !!candidate) || field.name || 'field';
+    let index = 2;
+    let name = `${base}${index}`;
+    while (reserved.has(name)) {
+      index++;
+      name = `${base}${index}`;
+    }
+    return name;
+  }
+
+  private getAutoFieldNameCandidates(field: Field) {
+    const candidates = [field.name];
+    if (field instanceof ForeignKeyField) {
+      candidates.push(toCamelCase(field.column.name), field.column.name);
+    } else if (field instanceof SimpleField) {
+      candidates.push(field.column.name);
+    } else if (field instanceof RelatedField) {
+      const model = field.referencingField.model;
+      const modelPluralName = toPascalCase(model.pluralName);
+      if (field.throughField) {
+        candidates.push(
+          field.throughField.name +
+            toPascalCase(field.throughField.referencedField.model.pluralName),
+          field.referencingField.name + modelPluralName
+        );
+      } else {
+        candidates.push(field.referencingField.name + modelPluralName);
+      }
+    }
+    return Array.from(new Set(candidates));
+  }
+
   private addField(field: Field) {
+    if (this.fieldMap.has(field.name)) {
+      if (!this.hasExplicitFieldName(field)) {
+        field.name = this.getUniqueAutoFieldName(
+          field,
+          new Set(this.fieldMap.keys())
+        );
+      }
+    }
+
     if (this.fieldMap.has(field.name)) {
       throw Error(`Duplicate field name: ${field.fullname}`);
     }

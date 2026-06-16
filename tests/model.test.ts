@@ -78,6 +78,42 @@ test('foreign key fields', () => {
   expect(buyer.referencedField.model).toBe(domain.model('user'));
 });
 
+test('foreign key field name falls back when it collides with a column', () => {
+  const domain = new Schema({
+    name: 'test',
+    tables: [
+      {
+        name: 'evaluation',
+        columns: [{ name: 'id', type: 'integer' }],
+        constraints: [{ primaryKey: true, columns: ['id'] }]
+      },
+      {
+        name: 'evaluation_run',
+        columns: [
+          { name: 'id', type: 'integer' },
+          { name: 'evaluation_id', type: 'integer' },
+          { name: 'evaluation', type: 'jsonb' }
+        ],
+        constraints: [
+          { primaryKey: true, columns: ['id'] },
+          {
+            columns: ['evaluation_id'],
+            references: { table: 'evaluation', columns: ['id'] }
+          }
+        ]
+      }
+    ]
+  });
+
+  const run = domain.model('evaluation_run')!;
+  const evaluation = run.field('evaluation') as SimpleField;
+  const evaluationId = run.field('evaluationId') as ForeignKeyField;
+
+  expect(evaluation.column.name).toBe('evaluation');
+  expect(evaluationId).toBe(run.field('evaluation_id'));
+  expect(evaluationId.referencedField.model).toBe(domain.model('evaluation'));
+});
+
 test('related fields', () => {
   const options: SchemaConfig = {
     models: [
