@@ -257,12 +257,12 @@ test('getInformationSchema', async() => {
     );
     const schema = new Schema(schemaInfo);
     const model = schema.model('order_shipping');
-    expect(model.primaryKey.fields[0].name).toBe('order');
-    expect(model.getForeignKeyCount(schema.model('order'))).toBe(1);
+    expect(model!.primaryKey.fields[0].name).toBe('order');
+    expect(model!.getForeignKeyCount(schema.model('order')!)).toBe(1);
     const product = schemaInfo.tables.find(table => table.name === 'product')
-    const name = product.columns.find(column => column.name === 'name');
-    expect(name.type).toBe('varchar');
-    expect(name.size).toBe(200);
+    const name = product!.columns.find(column => column.name === 'name');
+    expect(name!.type).toBe('varchar');
+    expect(name!.size).toBe(200);
   }
   await connection.end();
 });

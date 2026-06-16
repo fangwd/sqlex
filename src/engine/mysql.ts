@@ -2,15 +2,15 @@ import { Connection, QueryCounter, ConnectionPool, Dialect } from '.';
 
 import * as mysql from 'mysql2';
 import logger from '../logger';
-import { ResultSetHeader } from 'mysql2';
+import { ResultSetHeader, PoolOptions, ConnectionOptions } from 'mysql2';
 
 class _ConnectionPool extends ConnectionPool {
   private pool: mysql.Pool;
 
-  constructor(options) {
+  constructor(options: PoolOptions) {
     super();
     this.pool = mysql.createPool(options);
-    this.database = options.database;
+    this.database = options.database as string;
   }
 
   getConnection(): Promise<Connection> {
@@ -58,14 +58,15 @@ class _Connection extends Connection {
   connection: mysql.Connection | mysql.PoolConnection;
   queryCounter: QueryCounter = new QueryCounter();
 
-  constructor(options, connected?: string) {
+  constructor(options: ConnectionOptions | mysql.PoolConnection, connected?: string) {
     super();
     if (connected) {
-      this.connection = options;
+      this.connection = options as mysql.PoolConnection;
       this.database = connected;
     } else {
-      this.connection = mysql.createConnection(options);
-      this.database = options.database;
+      const config = options as ConnectionOptions;
+      this.connection = mysql.createConnection(config);
+      this.database = config.database as string;
     }
   }
 
@@ -116,10 +117,10 @@ class _Connection extends Connection {
 }
 
 export default {
-  createConnectionPool: (options): ConnectionPool => {
+  createConnectionPool: (options: PoolOptions): ConnectionPool => {
     return new _ConnectionPool(options);
   },
-  createConnection: (options): Connection => {
+  createConnection: (options: ConnectionOptions): Connection => {
     return new _Connection(options);
   }
 };

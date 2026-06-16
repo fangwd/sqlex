@@ -1,9 +1,9 @@
 import { promiseAll } from '../src/misc';
 
 test('promiseAll', done => {
-  const results = Array.apply(null, { length: 3 });
+  const results = Array.from({ length: 3 });
 
-  function createResolve(n) {
+  function createResolve(n: number) {
     return new Promise(resolve => {
       setTimeout(() => {
         results[n - 1] = true;
@@ -12,7 +12,7 @@ test('promiseAll', done => {
     });
   }
 
-  function createReject(n) {
+  function createReject(n: number) {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         results[n - 1] = false;

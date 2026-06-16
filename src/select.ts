@@ -52,10 +52,10 @@ async function _selectTree(
       const map = merge(result, table);
       const values = rows
         .map(r => model.valueOf(r, field))
-        .filter(value => !map.has(value));
+        .filter(value => !map.has(value as Value)) as Value[];
       if (values.length > 0) {
-        if (mayQuery(querySet, [table.model.keyField()], values)) {
-          const filter = { [table.model.keyField().name]: values };
+        if (mayQuery(querySet, [table.model.keyField()!], values)) {
+          const filter = { [table.model.keyField()!.name]: values };
           await _selectTree(table, filter, option, result, field, querySet);
         }
       }
@@ -90,15 +90,15 @@ async function _selectTree(
       const rows = await table.select('*', { where: filter });
       merge(result, table, rows);
       for (const [field, option] of fieldsThrough) {
-        const key = field.relatedField.throughField;
+        const key = field.relatedField!.throughField!;
         const table = db.table(key.referencedField);
         const map = merge(result, table);
         const values = rows
           .map(r => table.model.valueOf(r, key))
-          .filter(value => !map.has(value));
+          .filter(value => !map.has(value as Value)) as Value[];
         if (values.length > 0) {
-          if (mayQuery(querySet, [table.model.keyField()], values)) {
-            const filter = { [table.model.keyField().name]: values };
+          if (mayQuery(querySet, [table.model.keyField()!], values)) {
+            const filter = { [table.model.keyField()!.name]: values };
             await _selectTree(table, filter, option, result, key, querySet);
           }
         }
@@ -125,9 +125,9 @@ function merge(result: Result, table: Table, rows?: Document[]) {
     result[model.name] = map;
   }
   if (rows) {
-    const key = model.keyField();
+    const key = model.keyField()!;
     for (const row of rows) {
-      map.set(model.valueOf(row, key), row);
+      map.set(model.valueOf(row, key)!, row);
     }
   }
   return map;
@@ -158,11 +158,13 @@ export async function selectTree2(
 
   while (true) {
     let min: number = Infinity;
-    let next: {
-      parent: Table;
-      child: Table;
-      keys: ForeignKeyField[];
-    };
+    let next:
+      | {
+          parent: Table;
+          child: Table;
+          keys: ForeignKeyField[];
+        }
+      | undefined;
 
     for (const child of db.tableList) {
       if (selected.has(child)) continue;
@@ -188,17 +190,18 @@ export async function selectTree2(
       if (next.keys.length === 1) {
         const key = next.keys[0];
         if (key.relatedField && key.relatedField.throughField) {
+          const throughField = key.relatedField.throughField;
           const model = next.child.model;
           let values = rows.map(row =>
-            model.valueOf(row, key.relatedField.throughField)
-          );
-          const table = db.table(key.relatedField.throughField.referencedField);
+            model.valueOf(row, throughField)
+          ) as Value[];
+          const table = db.table(throughField.referencedField);
           const map = result[table.model.name];
           if (map) {
             values = values.filter(pk => !map.has(pk));
           }
           if (values.length > 0) {
-            const key = table.model.keyField().name;
+            const key = table.model.keyField()!.name;
             const rows = await table.select('*', { where: { [key]: values } });
             merge(result, table, rows);
             selected.set(table, min + 1);

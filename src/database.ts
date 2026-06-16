@@ -19,7 +19,20 @@ import {
   isValue,
 } from './schema';
 import { Schema as SchemaConfig } from './config';
-import { Column as ColumnInfo, Constraint, Document, Value } from './types';
+import {
+  Column as ColumnInfo,
+  Constraint,
+  Document,
+  DocumentValue,
+  MutationOptions,
+  SelectFields,
+  TableCreate,
+  TableFilter,
+  TableInsert,
+  TableRow,
+  TableUpdate,
+  Value
+} from './types';
 import {
   Connection,
   ConnectionPool,
@@ -38,7 +51,7 @@ import { JsonSerialiser } from './serialiser';
 import { ViewModel, ViewOptions } from './view';
 import { isPlainObject, pluck } from './utils';
 import { mock, cleanup } from './mock';
-import sprintf from './sprintf';
+import sprintf, { ArgType } from './sprintf';
 
 export class ClosureTable {
   constructor(
@@ -49,13 +62,13 @@ export class ClosureTable {
   ) { }
 }
 
-export class Database {
-  name: string;
-  schema: Schema;
+export class Database<TTables = any> {
+  name!: string;
+  schema!: Schema;
   operatorMap: OperatorMap;
-  pool: ConnectionPool;
-  tableMap: { [key: string]: Table } = {};
-  tableList: Table[] = [];
+  pool!: ConnectionPool;
+  tableMap: { [key: string]: Table<any> } = {};
+  tableList: Table<any>[] = [];
 
   constructor(connection: ConnectionPool | ConnectionInfo, schema?: Schema, operatorMap?: OperatorMap) {
     if (connection instanceof ConnectionPool) {
@@ -70,7 +83,7 @@ export class Database {
   }
 
   getModels(bulk: boolean = false): { [key: string]: any } {
-    return this.tableList.reduce((map, table) => {
+    return this.tableList.reduce<{ [key: string]: ReturnType<typeof getModel> }>((map, table) => {
       map[table.model.name] = getModel(table, bulk);
       return map;
     }, {});
@@ -90,8 +103,8 @@ export class Database {
     );
   }
 
-  clone(): Database {
-    return new Database(this.pool, this.schema);
+  clone(): Database<TTables> {
+    return new Database<TTables>(this.pool, this.schema);
   }
 
   private setSchema(schema: Schema) {
@@ -126,7 +139,7 @@ export class Database {
           throw Error(`Field ${fieldName} is not a foreign key`);
         }
 
-        let depth: SimpleField;
+        let depth: SimpleField | undefined;
         if (fields.depth) {
           depth = table.model.field(fields.depth) as SimpleField;
           if (!depth) {
@@ -134,12 +147,18 @@ export class Database {
           }
         }
 
-        this.table(model).closureTable = new ClosureTable(table, ancestor, descendant, depth);
+        const modelTable = this.table(model);
+        if (!modelTable) {
+          throw Error(`Table for model ${model.name} not found.`);
+        }
+        modelTable.closureTable = new ClosureTable(table, ancestor, descendant, depth);
       }
     }
   }
 
-  table(name: string | Field | Model): Table {
+  table<Name extends keyof TTables & string>(name: Name): Table<TTables[Name]>;
+  table(name: string | Field | Model): Table;
+  table(name: string | Field | Model): Table<any> {
     if (name instanceof Field) {
       name = name.model.name;
     } else if (name instanceof Model) {
@@ -152,6 +171,8 @@ export class Database {
     return this.table(name).model;
   }
 
+  append<Name extends keyof TTables & string>(name: Name, data: TableCreate<TTables[Name]>): Record;
+  append(name: string, data: { [key: string]: any }): any;
   append(name: string, data: { [key: string]: any }): any {
     return this.table(name).append(data);
   }
@@ -184,16 +205,16 @@ export class Database {
   }
 
   json() {
-    return this.tableList.reduce((result, table) => {
+    return this.tableList.reduce<{ [key: string]: ReturnType<Table['json']> }>((result, table) => {
       result[table.model.name] = table.json();
       return result;
     }, {});
   }
 
-  async query<T = Document[]>(fmt: string, ...args) {
+  async query<T = Document[]>(fmt: string, ...args: unknown[]) {
     const connection = await this.pool.getConnection();
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
-    const sql = sprintf(fmt, val, this.pool)
+    const sql = sprintf(fmt, val as ArgType, this.pool)
     try {
       const result = await connection._query(sql);
       return result as T;
@@ -203,7 +224,7 @@ export class Database {
     }
   }
 
-  async select<T extends Document = Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
+  async select<T extends object = Document>(options: DatabaseSelectOptions, connection?: Connection): Promise<T[]> {
     if (typeof options.from === 'string') {
       const table = this.table(options.from);
       if (table) {
@@ -258,8 +279,8 @@ export class Database {
 
 export type OrderBy = string | string[];
 
-export interface SelectOptions {
-  where?: Filter;
+export interface SelectOptions<TFilter = Filter> {
+  where?: TFilter;
   offset?: number;
   limit?: number;
   orderBy?: OrderBy;
@@ -281,23 +302,23 @@ export const SelectOptionKeys: (keyof SelectOptions)[] = [
   'raw',
 ];
 
-export interface DatabaseSelectOptions extends SelectOptions {
+export interface DatabaseSelectOptions<TFilter = Filter> extends SelectOptions<TFilter> {
   fields: string | string[],
   from: string | ViewOptions,
 }
 
-export class Table {
-  db: Database;
+export class Table<TSpec = any> {
+  db: Database<any>;
   name: string;
   model: Model;
   closureTable?: ClosureTable;
 
   recordList: Record[] = [];
-  recordMap: { [key: string]: { [key: string]: Record } };
+  recordMap!: { [key: string]: { [key: string]: Record } };
   noInsert = false;
   selectOnly?: Document;
 
-  constructor(db: Database, model: Model) {
+  constructor(db: Database<any>, model: Model) {
     this.db = db;
     this.name = model.table.name;
     this.model = model;
@@ -310,48 +331,49 @@ export class Table {
   }
 
   keyColumn(): ColumnInfo {
-    return this.column(this.model.keyField().name);
+    return this.column(this.model.keyField()!.name);
   }
 
   getParentField(model?: Model): ForeignKeyField {
-    return this.model.getForeignKeyOf(model || this.model);
+    return this.model.getForeignKeyOf(model || this.model)!;
   }
 
-  getAncestors(row: Value | Document, filter?: Filter): Promise<Document[]> {
-    const field = this.closureTable.ancestor;
+  getAncestors(row: Value | Document, filter?: TableFilter<TSpec> | Filter): Promise<Document[]> {
+    const field = this.closureTable!.ancestor;
     return this.db.pool.getConnection().then(connection =>
-      treeQuery(connection, this, row, field, filter).then(result => {
+      treeQuery(connection, this, row, field, filter as Filter).then(result => {
         connection.release();
         return result;
       })
     );
   }
 
-  getDescendants(row: Value | Document, filter?: Filter): Promise<Document[]> {
-    const field = this.closureTable.descendant;
+  getDescendants(row: Value | Document, filter?: TableFilter<TSpec> | Filter): Promise<Document[]> {
+    const field = this.closureTable!.descendant;
     return this.db.pool.getConnection().then(connection =>
-      treeQuery(connection, this, row, field, filter).then(result => {
+      treeQuery(connection, this, row, field, filter as Filter).then(result => {
         connection.release();
         return result;
       })
     );
   }
 
-  async select<T extends Document = Document>(
-    fields: string | Document | string[],
-    options: SelectOptions = {},
+  async select<T extends object = TableRow<TSpec>>(
+    fields: SelectFields<any> | string | Document | string[],
+    options: SelectOptions<TableFilter<TSpec> | Filter> = {},
     filterThunk?: (builder: QueryBuilder) => string,
     connection?: Connection
   ): Promise<T[]> {
+    const fieldSpec = fields as string | Document | string[];
     if (connection) {
       const result = await this._select(
         connection,
-        fields,
-        options,
+        fieldSpec,
+        options as SelectOptions,
         filterThunk
       );
-      if (!Array.isArray(fields)) {
-        await this._resolveRelatedFields(connection, result, fields);
+      if (!Array.isArray(fieldSpec)) {
+        await this._resolveRelatedFields(connection, result, fieldSpec);
       }
       return result as T[];
     }
@@ -359,12 +381,12 @@ export class Table {
     try {
       const result = await this._select(
         connection,
-        fields,
-        options,
+        fieldSpec,
+        options as SelectOptions,
         filterThunk
       );
-      if (!Array.isArray(fields)) {
-        await this._resolveRelatedFields(connection, result, fields);
+      if (!Array.isArray(fieldSpec)) {
+        await this._resolveRelatedFields(connection, result, fieldSpec);
       }
       connection.release();
       return result as T[];
@@ -374,7 +396,11 @@ export class Table {
     }
   }
 
-  async first<T extends Document = Document>(fields: string | Document | string[], filter: Filter = {}, orderBy?: OrderBy) {
+  async first<T extends object = TableRow<TSpec>>(
+    fields: SelectFields<any> | string | Document | string[],
+    filter: TableFilter<TSpec> | Filter = {},
+    orderBy?: OrderBy
+  ) {
     const rows = await this.select<T>(fields, { where: filter, limit: 1, orderBy });
     return rows[0];
   }
@@ -388,27 +414,29 @@ export class Table {
       return Promise.resolve(result);
     }
 
-    const pk = this.model.keyField().name;
-    const values = result.map(row => this.model.valueOf(row, pk));
+    const pk = this.model.keyField()!.name;
+    const values = result.map(row => this.model.valueOf(row, pk) as Value);
 
     for (const name in fields) {
       const field = this.model.field(name);
       const value = fields[name];
 
       if (field instanceof RelatedField && value) {
-        let options, fields;
+        let options: SelectOptions;
+        let fields: string | Document;
         if (typeof value !== 'object') {
           options = {};
           fields = '*';
         } else {
-          options = Object.assign({}, value);
+          const config = Object.assign({}, value) as Document & { fields?: string | Document };
+          options = config as SelectOptions;
           // TODO: Document options.fields for related fields!
-          if (options.fields) {
-            fields = options.fields;
-            delete options.fields;
+          if (config.fields) {
+            fields = config.fields;
+            delete config.fields;
           } else if (field.referencingField.isUnique()) {
             options = {};
-            fields = value;
+            fields = value as Document;
           }
           else {
             fields = '*';
@@ -422,7 +450,7 @@ export class Table {
           options
         );
         result.forEach((entry, index) => {
-          entry[name] = rows[index];
+          entry[name] = rows[index] as DocumentValue;
         });
       }
     }
@@ -440,13 +468,13 @@ export class Table {
               if (doc === null) {
                 values.push(null);
               } else {
-                values.push(table.model.keyValue(doc));
+                values.push(table.model.keyValue(doc) as Value);
               }
             }
             const docs = await table.select(
               value,
               {
-                where: { [table.model.keyField().name]: values }
+                where: { [table.model.keyField()!.name]: values }
               },
               undefined,
               connection
@@ -475,38 +503,50 @@ export class Table {
     return result;
   }
 
-  async get<T extends Document = Document>(key: Value | Filter): Promise<T> {
+  async get<T extends object = TableRow<TSpec>>(key: Value | TableFilter<TSpec> | Filter): Promise<T> {
     return this._call('_get', key);
   }
 
-  async insert<T extends Document = Document>(data: Row): Promise<T> {
+  async insert<T = number>(data: TableInsert<TSpec>): Promise<T> {
     return this._call('_insert', data);
   }
 
-  async create<T extends Document = Document>(data: Document): Promise<T> {
-    return this._call('_create', data);
+  async create<T extends object = TableRow<TSpec>>(
+    data: TableCreate<TSpec>,
+    options?: MutationOptions<T>
+  ): Promise<T> {
+    return this._call('_create', data, options);
   }
 
-  async update<T extends Document = Document>(data: T, filter?: Filter): Promise<T> {
+  async update<T = any>(
+    data: TableUpdate<TSpec>,
+    filter?: TableFilter<TSpec>
+  ): Promise<T> {
     return this._call('_update', data, filter);
   }
 
-  upsert<T extends Document = Document>(data: T, update?: Document): Promise<T> {
-    return this._call('_upsert', data, update);
+  upsert<T extends object = TableRow<TSpec>>(
+    data: TableCreate<TSpec>,
+    update?: TableUpdate<TSpec>,
+    options?: MutationOptions<T>
+  ): Promise<T> {
+    return this._call('_upsert', data, update, options);
   }
 
-  modify<T extends Document = Document>(data: T, filter: Filter): Promise<T> {
-    return this._call('_modify', data, filter);
+  modify<T extends object = TableRow<TSpec>>(
+    data: TableUpdate<TSpec>,
+    filter: TableFilter<TSpec>,
+    options?: MutationOptions<T>
+  ): Promise<T> {
+    return this._call('_modify', data, filter, options);
   }
 
-  private async _call(
-    method: string,
-    data?: Document | Value | Filter,
-    filter?: Filter | Document
-  ): Promise<any> {
+  private async _call(method: string, ...args: any[]): Promise<any> {
     const connection = await this.db.pool.getConnection();
     try {
-      const result = await this[method](connection, data, filter);
+      const methods = this as unknown as { [key: string]: (...args: never[]) => Promise<unknown> };
+      const fn = methods[method];
+      const result = await fn.apply(this, [connection, ...args] as never[]);
       connection.release();
       return result;
     } catch (error) {
@@ -571,8 +611,8 @@ export class Table {
     const result: Array<{ row: Document, constraint: Constraint }> = [];
     for (const constraint of this.model.table.constraints) {
       if (constraint.primaryKey || constraint.unique) {
-        const fields = constraint.columns.map(name => this.model.field(name));
-        const filter = {};
+        const fields = constraint.columns.map(name => this.model.field(name)!);
+        const filter: Document = {};
         let ignore = false;
         for (const field of fields) {
           const value = data[field.name];
@@ -585,7 +625,7 @@ export class Table {
         if (ignore) {
           continue;
         }
-        const row = await this.get(filter);
+        const row = await this.get<Document>(filter);
         if (row) {
           result.push({ row, constraint });
         }
@@ -636,7 +676,7 @@ export class Table {
       sql += ` offset ${parseInt(options.offset + '')}`;
     }
     return connection._query(sql).then(rows => {
-      return rows.map(row => {
+      return rows.map((row: Row) => {
         if (Array.isArray(fields)) {
           return row;
         }
@@ -664,7 +704,7 @@ export class Table {
           continue;
         }
         if (rhs === null) continue;
-        if (lhs.toString() === rhs.toString()) {
+        if (lhs!.toString() === rhs!.toString()) {
           delete data[name];
         }
       }
@@ -711,7 +751,7 @@ export class Table {
     const value = keys.map(key => this.escapeValue(key, data[key])).join(', ');
     const sql = `insert into ${this._name()} (${name}) values (${value})`;
     return connection
-      ._query(sql, this.model.keyField().column.name)
+      ._query(sql, this.model.keyField()!.column.name)
       .then(insertId => (typeof insertId === 'number' ? insertId : 0));
   }
 
@@ -733,6 +773,33 @@ export class Table {
     }
   }
 
+  /**
+   * Deletes rows matching `filter` one level at a time, leaves first, following a
+   * self-referential foreign key. This avoids relying on the database's ON DELETE
+   * CASCADE for the self-reference, whose cascade depth MySQL caps (error 6575:
+   * "Foreign key cascade delete/update exceeds max tables limit"). It assumes the
+   * matched set is closed under descendants, which holds for replaceRecordsIn (a
+   * kept record's parent is always kept too).
+   */
+  async _deleteLeaves(
+    connection: Connection,
+    filter: Filter,
+    selfField: ForeignKeyField
+  ): Promise<void> {
+    const name = this._name();
+    const pk = this.escapeName(this.model.keyField()!);
+    const fk = this.escapeName(selfField);
+    const where = this._where(filter);
+    for (;;) {
+      const sql =
+        `delete from ${name} where (${where}) and ${pk} not in ` +
+        `(select ${fk} from (select ${fk} from ${name} where ${fk} is not null) as t)`;
+      const result = await connection._query(sql);
+      const affected = result?.affectedRows ?? result?.affectedRowCount ?? 0;
+      if (!affected) break;
+    }
+  }
+
   escapeName(name: SimpleField | string | number): string {
     if (name instanceof SimpleField) {
       name = name.column.name;
@@ -747,14 +814,19 @@ export class Table {
   }
 
   escapeValue(field: SimpleField | string, value: Value): string {
-    if (typeof value === 'boolean') {
-      return value ? 'true' : 'false';
-    }
     if (value === null || value === undefined) {
       return 'null';
     }
     if (typeof field === 'string') {
       field = this.model.field(field) as SimpleField;
+    }
+    // json columns store any non-null value (including booleans and numbers) as a
+    // JSON literal, so this must come before the boolean/number branches below.
+    if (/^json/i.test(field.column.type)) {
+      return this.db.pool.escape(JSON.stringify(value));
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
     }
     if (/int|float|double|number|numeric|decimal|real/i.test(field.column.type)) {
       return +(value as number) + '';
@@ -776,7 +848,7 @@ export class Table {
     if (key === undefined) throw Error(`Bad filter`);
     if (key === null || typeof key !== 'object') {
       key = {
-        [this.model.keyField().name]: key
+        [this.model.keyField()!.name]: key
       };
     } else if (!this.model.checkUniqueKey(key as Document)) {
       const msg = `Bad selector: ${JSON.stringify(key)}`;
@@ -794,13 +866,13 @@ export class Table {
     filter?: Filter
   ): Promise<Row> {
     const result: Row = {};
-    const promises = [];
+    const promises: Promise<Document>[] = [];
     const self = this;
 
     function _createPromise(field: ForeignKeyField, data: Document): void {
       const table = self.db.table(field.referencedField.model);
       const method = Object.keys(data)[0];
-      let promise;
+      let promise: Promise<Document>;
       switch (method) {
         case 'connect':
           promise = table._get(connection, data[method] as Document);
@@ -810,7 +882,7 @@ export class Table {
           break;
         case 'update':
           {
-            const where = { [field.relatedField.name]: filter };
+            const where = { [field.relatedField!.name]: filter as Filter };
             promise = table._modify(
               connection,
               data[method] as Document,
@@ -825,7 +897,7 @@ export class Table {
       if (method !== 'update') {
         promise.then(row => {
           result[field.name] = row
-            ? row[field.referencedField.model.keyField().name]
+            ? row[field.referencedField.model.keyField()!.name] as Value
             : null;
           return row;
         });
@@ -850,16 +922,51 @@ export class Table {
     return Promise.all(promises).then(() => result);
   }
 
-  _create(connection: Connection, data: Document): Promise<Document> {
+  private async _returning(
+    connection: Connection,
+    key: Value | Filter,
+    returning?: SelectFields<any>
+  ): Promise<Document> {
+    if (!returning) {
+      return this._get(connection, key);
+    }
+
+    let where = key as Filter;
+    if (key === null || typeof key !== 'object' || key instanceof Date || Array.isArray(key)) {
+      where = {
+        [this.model.keyField()!.name]: key
+      };
+    }
+
+    const rows = await this.select<Document>(
+      returning as string | Document | string[],
+      { where, limit: 1 },
+      undefined,
+      connection
+    );
+    return rows[0];
+  }
+
+  _create(
+    connection: Connection,
+    data: Document,
+    options?: MutationOptions
+  ): Promise<Document> {
     if (Object.keys(data).length === 0) throw Error('Empty data');
 
     return this._resolveParentFields(connection, data).then(row =>
       this._insert(connection, row).then(id => {
         return this._updateChildFields(connection, data, id).then(() =>
-          this._get(connection, id).then(row =>
-            this.closureTable
+          this._get(connection, id).then(row => {
+            const ready = this.closureTable
               ? createNode(connection, this, row).then(() => row)
-              : row
+              : Promise.resolve(row);
+            return ready.then(row =>
+              options?.returning
+                ? this._returning(connection, id, options.returning)
+                : row
+            );
+          }
           )
         );
       })
@@ -867,9 +974,10 @@ export class Table {
   }
 
   private _upsert(
-    connection,
+    connection: Connection,
     data: Document,
-    update?: Document
+    update?: Document,
+    options?: MutationOptions
   ): Promise<Document> {
     if (!this.model.checkUniqueKey(data)) {
       return Promise.reject(`Incomplete: ${JSON.stringify(data)}`);
@@ -878,13 +986,15 @@ export class Table {
     const self = this;
 
     return this._resolveParentFields(connection, data).then(row => {
-      const uniqueFields = getUniqueFields(self.model, row);
+      const uniqueFields = getUniqueFields(self.model, row)!;
       return self._get(connection, uniqueFields).then(row => {
         if (!row) {
-          return self._create(connection, data);
+          return self._create(connection, data, options);
         } else {
           if (update && Object.keys(update).length > 0) {
-            return self._modify(connection, update, uniqueFields);
+            return self._modify(connection, update, uniqueFields, options);
+          } else if (options?.returning) {
+            return self._returning(connection, uniqueFields, options.returning);
           } else {
             return row;
           }
@@ -894,9 +1004,10 @@ export class Table {
   }
 
   private _modify(
-    connection,
+    connection: Connection,
     data: Document,
-    filter: Filter
+    filter: Filter,
+    options?: MutationOptions
   ): Promise<Document> {
     if (!this.model.checkUniqueKey(filter as Document)) {
       return Promise.reject(`Bad filter: ${JSON.stringify(filter)}`);
@@ -906,7 +1017,7 @@ export class Table {
 
     return this._resolveParentFields(connection, data, filter).then(row => {
       return self._update(connection, row, filter).then(() => {
-        const where = Object.assign({}, filter);
+        const where = Object.assign({}, filter) as Document;
         for (const key in where) {
           if (key in row) {
             where[key] = row[key];
@@ -914,12 +1025,17 @@ export class Table {
         }
         return self._get(connection, where as Document).then(row => {
           if (row) {
-            const id = row[this.model.keyField().name] as Value;
-            return this._updateChildFields(connection, data, id).then(() =>
-              !this.closureTable || !data[this.getParentField().name]
-                ? row
-                : moveSubtree(connection, this, row).then(() => row)
-            );
+            const id = row[this.model.keyField()!.name] as Value;
+            return this._updateChildFields(connection, data, id).then(() => {
+              const ready = !this.closureTable || !data[this.getParentField().name]
+                ? Promise.resolve(row)
+                : moveSubtree(connection, this, row).then(() => row);
+              return ready.then(row =>
+                options?.returning
+                  ? this._returning(connection, id, options.returning)
+                  : row
+              );
+            });
           } else {
             return Promise.resolve(row);
           }
@@ -1017,7 +1133,7 @@ export class Table {
             throw Error('Bad data');
           }
           create = Object.assign({ [field.name]: id }, create);
-          if (create[field.name] === undefined) {
+          if ((create as Document)[field.name] === undefined) {
             update = Object.assign({ [field.name]: id }, update);
           }
           promises.push(
@@ -1030,7 +1146,7 @@ export class Table {
           continue;
         }
         for (const arg of toArray(args)) {
-          let data, where;
+          let data: DocumentValue, where: DocumentValue;
           if (arg.data === undefined) {
             data = arg;
             where = {};
@@ -1038,8 +1154,8 @@ export class Table {
             data = arg.data;
             where = arg.where;
           }
-          const filter = { [field.name]: id, ...where };
-          promises.push(table._modify(connection, data, filter));
+          const filter = { [field.name]: id, ...(where as Document) };
+          promises.push(table._modify(connection, data as Document, filter));
         }
       } else if (method === 'delete') {
         if (related.throughField) {
@@ -1105,14 +1221,15 @@ export class Table {
     value: Value,
     args: Document[]
   ): Promise<any> {
-    const table = this.db.table(related.throughField.referencedField.model);
-    const mapping = this.db.table(related.throughField.model);
+    const throughField = related.throughField!;
+    const table = this.db.table(throughField.referencedField.model);
+    const mapping = this.db.table(throughField.model);
     const promises = args.map(arg =>
       table._get(connection, arg).then(row =>
         row
           ? mapping._create(connection, {
             [related.referencingField.name]: value,
-            [related.throughField.name]: row[table.model.keyField().name]
+            [throughField.name]: row[table.model.keyField()!.name]
           })
           : Promise.resolve(null)
       )
@@ -1126,13 +1243,14 @@ export class Table {
     value: Value,
     args: Document[]
   ): Promise<any> {
-    const table = this.db.table(related.throughField.referencedField.model);
-    const mapping = this.db.table(related.throughField.model);
+    const throughField = related.throughField!;
+    const table = this.db.table(throughField.referencedField.model);
+    const mapping = this.db.table(throughField.model);
     const promises = args.map(arg =>
       table._create(connection, arg).then(row =>
         mapping._create(connection, {
           [related.referencingField.name]: value,
-          [related.throughField.name]: row[table.model.keyField().name]
+          [throughField.name]: row[table.model.keyField()!.name]
         })
       )
     );
@@ -1145,15 +1263,16 @@ export class Table {
     value: Value,
     args: Document[]
   ): Promise<any> {
-    const table = this.db.table(related.throughField.referencedField.model);
-    const mapping = this.db.table(related.throughField.model);
+    const throughField = related.throughField!;
+    const table = this.db.table(throughField.referencedField.model);
+    const mapping = this.db.table(throughField.model);
     const promises = args.map(arg =>
       table
         ._upsert(connection, arg.create as Document, arg.update as Document)
         .then(row =>
           mapping._upsert(connection, {
             [related.referencingField.name]: value,
-            [related.throughField.name]: row[table.model.keyField().name]
+            [throughField.name]: row[table.model.keyField()!.name]
           })
         )
     );
@@ -1166,19 +1285,21 @@ export class Table {
     value: Value,
     args: Document[]
   ): Promise<any> {
-    const model = related.throughField.referencedField.model;
+    const throughField = related.throughField!;
+    const relatedField = throughField.relatedField!;
+    const model = throughField.referencedField.model;
     const promises = args.map(arg => {
       let where;
-      if (related.throughField.relatedField.throughField) {
+      if (relatedField.throughField) {
         where = {
-          [related.throughField.relatedField.name]: {
-            [related.model.keyField().name]: value
+          [relatedField.name]: {
+            [related.model.keyField()!.name]: value
           },
           ...(arg.where as object)
         };
       } else {
         where = {
-          [related.throughField.relatedField.name]: {
+          [relatedField.name]: {
             [related.referencingField.name]: value
           },
           ...(arg.where as object)
@@ -1197,23 +1318,24 @@ export class Table {
     value: Value,
     args: Document[]
   ): Promise<any> {
-    const mapping = this.db.table(related.throughField.model);
-    const table = this.db.table(related.throughField.referencedField.model);
+    const throughField = related.throughField!;
+    const mapping = this.db.table(throughField.model);
+    const table = this.db.table(throughField.referencedField.model);
     return mapping
       ._select(connection, '*', {
         where: {
           [related.referencingField.name]: value,
-          [related.throughField.name]: args
+          [throughField.name]: args
         }
       })
       .then(rows => {
         if (rows.length === 0) return Promise.resolve(0);
         const values = rows.map(
-          row => row[related.throughField.name][table.model.keyField().name]
+          row => ((row as Document)[throughField.name] as Document)[table.model.keyField()!.name] as Value
         );
         return mapping._delete(connection, rows).then(() =>
           table._delete(connection, {
-            [table.model.keyField().name]: values
+            [table.model.keyField()!.name]: values
           })
         );
       });
@@ -1225,10 +1347,11 @@ export class Table {
     value: Value,
     args: Document[]
   ): Promise<any> {
-    const mapping = this.db.table(related.throughField.model);
+    const throughField = related.throughField!;
+    const mapping = this.db.table(throughField.model);
     return mapping._delete(connection, {
       [related.referencingField.name]: value,
-      [related.throughField.name]: args
+      [throughField.name]: args
     });
   }
 
@@ -1239,9 +1362,9 @@ export class Table {
 
     return new Promise(resolve => {
       function _select() {
-        self.select('*', { where: filter, limit: 10, orderBy }).then(rows => {
+        self.select<Document>('*', { where: filter, limit: 10, orderBy }).then(rows => {
           if (rows.length === 0) {
-            resolve(null);
+            resolve(null as unknown as Document);
           } else {
             const row = rows[Math.floor(Math.random() * rows.length)];
             _update(row);
@@ -1249,10 +1372,10 @@ export class Table {
         });
       }
 
-      function _update(row) {
+      function _update(row: Document) {
         const where = { ...filter, ...getUniqueFields(self.model, row) };
         self
-          .update(data, where)
+          .update(data as TableUpdate<TSpec>, where as TableFilter<TSpec>)
           .then(result => {
             if ((result.affectedRowCount || result.affectedRows) === 1) {
               resolve(row);
@@ -1287,17 +1410,18 @@ export class Table {
       return record;
     }
     for (const name in data) {
-      if (existing[name] != data[name]) {
+      const value = (data as Document)[name];
+      if (existing[name] != value) {
         const field = record.__table.model.field(name);
         if (field instanceof ForeignKeyField) {
           const model = field.referencedField.model;
           if (existing[name] !== undefined) {
-            if (pkOf(model, existing[name]) == pkOf(model, data[name])) {
+            if (pkOf(model, existing[name]) == pkOf(model, value)) {
               continue;
             }
           }
         }
-        existing[name] = data[name];
+        existing[name] = value;
       }
     }
     return existing;
@@ -1328,8 +1452,8 @@ export class Table {
     return this.recordList.map(record => record.__json());
   }
 
-  _mapGet(record: Record): Record {
-    let existing: Record;
+  _mapGet(record: Record): Record | undefined {
+    let existing: Record | undefined;
     for (const uc of this.model.uniqueKeys) {
       const value = record.__valueOf(uc);
       if (value !== undefined && value !== null) {
@@ -1358,7 +1482,7 @@ export class Table {
   }
 
   _initMap() {
-    this.recordMap = this.model.uniqueKeys.reduce((map, uc) => {
+    this.recordMap = this.model.uniqueKeys.reduce<{ [key: string]: { [key: string]: Record } }>((map, uc) => {
       map[uc.name()] = {};
       return map;
     }, {});
@@ -1368,7 +1492,7 @@ export class Table {
     connection: Connection,
     field: RelatedField,
     values: Value[],
-    fields,
+    fields: string | Document,
     selectOptions: SelectOptions
   ) {
     const table = this.db.table(field.referencingField.model);
@@ -1377,14 +1501,15 @@ export class Table {
     if (selectOptions.limit) {
       const promises = [];
       if (field.throughField) {
+        const throughField = field.throughField;
         for (const value of values) {
           const options = Object.assign({}, selectOptions);
           options.where = {
-            [field.throughField.name]: options.where,
+            [throughField.name]: options.where,
             [field.referencingField.name]: value
-          };
+          } as Filter;
           if (options.orderBy) {
-            const prefix = field.throughField.name;
+            const prefix = throughField.name;
             options.orderBy = toArray(options.orderBy).map((name: string) =>
               name[0] === '-'
                 ? `-${prefix}.${name.substring(1)}`
@@ -1394,12 +1519,12 @@ export class Table {
           promises.push(
             table
               .select(
-                { [field.throughField.name]: fields },
+                { [throughField.name]: fields },
                 options,
                 undefined,
                 connection
               )
-              .then(rows => rows.map(row => row[field.throughField.name]))
+              .then(rows => rows.map(row => row[throughField.name]))
           );
         }
       } else {
@@ -1430,10 +1555,11 @@ export class Table {
     const options = Object.assign({ where: {} }, selectOptions);
 
     if (field.throughField) {
-      options.where = { [field.throughField.name]: options.where };
+      const throughField = field.throughField;
+      options.where = { [throughField.name]: options.where };
       options.where[field.referencingField.name] = values;
       if (options.orderBy) {
-        const prefix = field.throughField.name;
+        const prefix = throughField.name;
         options.orderBy = toArray(options.orderBy).map((name: string) =>
           name[0] === '-'
             ? `-${prefix}.${name.substring(1)}`
@@ -1442,31 +1568,31 @@ export class Table {
       }
       return table
         .select(
-          { [field.throughField.name]: fields },
+          { [throughField.name]: fields },
           options,
           undefined,
           connection
         )
         .then(rows => {
-          const id = field.referencingField.model.keyField().name;
+          const id = field.referencingField.model.keyField()!.name;
           if (field.referencingField.isUnique()) {
             return values.map(key => {
-              const row = rows.find(row => row[name][id] === key);
-              return row ? row[field.throughField.name] : undefined;
+              const row = rows.find(row => (row[name] as Document)[id] === key);
+              return row ? row[throughField.name] : undefined;
             });
           } else {
             return values
-              .map(key => rows.filter(row => row[name][id] === key))
-              .map(docs => docs.map(doc => doc[field.throughField.name]));
+              .map(key => rows.filter(row => (row[name] as Document)[id] === key))
+              .map(docs => docs.map(doc => doc[throughField.name]));
           }
         });
     } else {
-      options.where[name] = values;
+      (options.where as Document)[name] = values;
       return table.select(fields, options, undefined, connection).then(rows => {
-        const id = field.referencingField.model.keyField().name;
+        const id = field.referencingField.model.keyField()!.name;
         if (field.referencingField.isUnique()) {
           return values.map(key => {
-            const row = rows.find(row => row[name] && row[name][id] === key);
+            const row = rows.find(row => row[name] && (row[name] as Document)[id] === key);
             if (row) {
               delete row[name];
             }
@@ -1474,7 +1600,7 @@ export class Table {
           });
         } else {
           return values
-            .map(key => rows.filter(row => row[name][id] === key))
+            .map(key => rows.filter(row => (row[name] as Document)[id] === key))
             .map(docs => {
               for (const doc of docs) {
                 delete doc[name];
@@ -1514,23 +1640,23 @@ export class Table {
   ): Promise<Document[]> {
     config = { ...config };
 
-    let attrs;
+    let attrs: string;
     if (config['*']) {
-      attrs = config['*'];
+      attrs = config['*'] as string;
       delete config['*'];
     }
 
     const fields = recordConfigToDocument(this, config);
 
-    return this.select(fields, options).then(docs => {
+    return this.select<Document>(fields, options).then(docs => {
       if (attrs) {
         const options = parseRelatedOption(attrs);
         const table = this.db.table(
           (this.model.field(options.name) as RelatedField).referencingField
             .model
         );
-        const range = docs.map(doc => this.model.keyValue(doc));
-        const field = table.model.getForeignKeyOf(this.model);
+        const range = docs.map(doc => this.model.keyValue(doc) as Value);
+        const field = table.model.getForeignKeyOf(this.model)!;
         const where = { [field.name]: range };
         return table
           .select('*', { where })
@@ -1553,7 +1679,7 @@ export class Table {
             return result;
           });
       } else {
-        return [].concat.apply([], docs.map(doc => mapDocument(doc, config)));
+        return ([] as Document[]).concat(...docs.map(doc => mapDocument(doc, config)));
       }
     });
   }
@@ -1570,7 +1696,7 @@ export class Table {
   }
 
   mock(data?: Document, save?: boolean) {
-    return mock(this, data, save);
+    return mock(this, data as Document, save);
   }
 
   mockMany(data: Document[], save?: boolean) {
@@ -1578,7 +1704,7 @@ export class Table {
   }
 }
 
-export function _toCamel(value: Value, field: SimpleField): Value {
+export function _toCamel(value: Value | any, field: SimpleField): Value | any {
   if (value === null || value === undefined) return null;
 
   if (value instanceof Record) return value;
@@ -1614,6 +1740,13 @@ export function _toCamel(value: Value, field: SimpleField): Value {
     return !!value;
   }
 
+  if (/^json/i.test(field.column.type)) {
+    if (typeof value === 'string') {
+      return JSON.parse(value);
+    }
+    return value;
+  }
+
   if (field.uniqueKey) {
     // mysql ...
     return (value + '').trim();
@@ -1622,7 +1755,7 @@ export function _toCamel(value: Value, field: SimpleField): Value {
   return value;
 }
 
-function setNullForeignKeys(result: Document, model: Model): Document {
+function setNullForeignKeys(result: Document, model: Model): Document | null {
   if (model.keyValue(result) === null) {
     return null;
   }
@@ -1640,12 +1773,12 @@ function setNullForeignKeys(result: Document, model: Model): Document {
 }
 
 export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Document {
-  const result = {};
+  const result: Document = {};
   for (const key in row) {
     const mapped = fieldMap ? fieldMap.get(key) : null;
     const path = mapped && mapped.path || key;
     const fieldNames = path.split('.');
-    let currentResult = result;
+    let currentResult: Document = result;
     let currentModel = model;
 
     for (let i = 0; i < fieldNames.length - 1; i++) {
@@ -1657,7 +1790,7 @@ export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Documen
       if (!(field instanceof ForeignKeyField)) {
         throw Error(`Not a foreign key: ${key}`);
       }
-      currentResult = currentResult[fieldName];
+      currentResult = currentResult[fieldName] as Document;
       currentModel = field.referencedField.model;
     }
 
@@ -1676,13 +1809,13 @@ export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Documen
             currentResult[fieldName] = {};
           }
           let keyField = field.referencedField.model.keyField();
-          let result = currentResult[fieldName];
+          let result = currentResult[fieldName] as Document;
           while (keyField instanceof ForeignKeyField) {
             result[keyField.name] = {};
-            result = result[keyField.name];
+            result = result[keyField.name] as Document;
             keyField = keyField.referencedField.model.keyField();
           }
-          result[keyField.name] = value;
+          result[keyField!.name] = value;
         } else {
           currentResult[fieldName] = null;
         }
@@ -1692,7 +1825,7 @@ export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Documen
     }
   }
 
-  return setNullForeignKeys(result, model);
+  return setNullForeignKeys(result, model) as Document;
 }
 
 export function isEmpty(value: Value | Record | any) {
@@ -1717,7 +1850,7 @@ function pkOf(model: Model, data: unknown): Value {
   if (pk instanceof ForeignKeyField) {
     return pkOf(pk.referencedField.model, (<Document>data)[pk.name]);
   }
-  return <Value>(<Document>data)[pk.name];
+  return <Value>(<Document>data)[pk!.name];
 }
 
 export function shouldSelectSeparately(
@@ -1740,13 +1873,13 @@ export function shouldSelectSeparately(
 export function getUniqueFields(model: Model, row: Document) {
   const uniqueKey = model.checkUniqueKey(row);
   if (uniqueKey) {
-    const fields = {};
+    const fields: Row = {};
     for (const field of uniqueKey.fields) {
       const value = row[field.name];
       if (value instanceof Record) {
         fields[field.name] = value.__primaryKey();
       } else {
-        fields[field.name] = row[field.name];
+        fields[field.name] = row[field.name] as Value;
       }
     }
     return fields;

@@ -2,15 +2,27 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "es6",
-    "types": ["jest"],
-    "typeRoots": ["node_modules/@types"],
+    "types": [
+      "jest"
+    ],
+    "typeRoots": [
+      "node_modules/@types"
+    ],
     "sourceMap": true,
     "outDir": "dist",
-    "lib": ["es6"],
+    "lib": [
+      "es6"
+    ],
     "declaration": true,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "strict": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

@@ -3,6 +3,8 @@ import { encodeFilter, QueryBuilder, plainify } from '../src/filter';
 
 import * as helper from './helper';
 import { DialectEncoder } from '../src/engine';
+import type { Filter } from '../src';
+import type { CommentFilter } from './schema-types';
 
 const NAME = 'filter';
 
@@ -62,16 +64,13 @@ test('example query', async() => {
 
 test('ilike', async ()=> {
   const db = helper.connectToDatabase(NAME);
-  if (helper.DB_TYPE !== 'postgres') {
-    db.operatorMap['ilike'] = 'like';
-  }
   const rows = await db.table('group').select('*', {where:  {name_ilike: 'adm%'}});
   expect(rows.length).toBe(1);
   await db.end();
 });
 
 test('foreign key column filter', () => {
-  const model = domain.model('OrderItem');
+  const model = domain.model('OrderItem') as Model;
 
   const args = {
     order: {
@@ -191,7 +190,7 @@ test('not', async() => {
 });
 
 test('order by', () => {
-  const model = domain.model('OrderItem');
+  const model = domain.model('OrderItem') as Model;
   const args = {
     where: { quantity_gt: 1 },
     orderBy: ['-order.code', 'order.user.email', 'quantity']
@@ -204,7 +203,7 @@ test('order by', () => {
 
 test('throughField', async () => {
   const db = helper.connectToDatabase(NAME);
-  const args = [
+  const args: Filter = [
     { ancestor: { products: [{ id: 3 }] } },
     { descendant: { products: [{ id: 3 }] } }
   ];
@@ -280,7 +279,7 @@ describe('notIn', () => {
 describe('not null', () => {
   test('should work for non-foreign key fields', async () => {
     const db = helper.connectToDatabase(NAME);
-    const args = {
+    const args: CommentFilter = {
       content_ne: null
     };
     const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
@@ -291,7 +290,7 @@ describe('not null', () => {
 
   test('should work for foreign keys', async () => {
     const db = helper.connectToDatabase(NAME);
-    const args = {
+    const args: CommentFilter = {
       parent_ne: null,
     };
     const rows = await db.table('comment').select('*', { where: args, orderBy: ['id'] });
@@ -304,7 +303,7 @@ describe('not null', () => {
 describe('having', () => {
   test('filter only on aggregate values', async () => {
     const db = helper.connectToDatabase(NAME);
-    const rows = await db.table('order_item').select(['order.id', 'count(*) as itemCount'], {
+    const rows = await db.table('order_item').select<{ id: number; itemCount: number }>(['order.id', 'count(*) as itemCount'], {
       groupBy: ['order.id'],
       having: { itemCount_gt: 2 },
     });
@@ -313,13 +312,13 @@ describe('having', () => {
   });
   test('filter on aggregate values and grouped by values', async () => {
     const db = helper.connectToDatabase(NAME);
-    const rows = await db.table('order_item').select(['product.name', 'count(*) as itemCount'], {
+    const rows = await db.table('order_item').select<{ name: string; itemCount: number }>(['product.name', 'count(*) as itemCount'], {
       groupBy: ['product.name'],
       having: { itemCount_lt: 2, name_like: 'Australia%' },
     });
     expect(rows.length).toBe(1);
     expect(rows[0].name).toContain('Banana');
-    const rows2 = await db.select({
+    const rows2 = await db.select<{ name: string; itemCount: number }>({
       fields: ['product.name', 'count(*) as itemCount'],
       from: {
         table: 'order_item',

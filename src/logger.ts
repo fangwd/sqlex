@@ -21,41 +21,41 @@ export class Logger {
     this.level = Levels[options.level];
   }
 
-  write() {
-    console.log.apply(null, [this.name, ...arguments]);
+  write(...args: unknown[]) {
+    console.log.apply(null, [this.name, ...args]);
   }
 
-  trace(...args: any[]) {
+  trace(...args: unknown[]) {
     if (this.level <= Levels.TRACE) {
       this.write.apply(this, args);
     }
   }
 
-  debug(...args: any[]) {
+  debug(...args: unknown[]) {
     if (this.level <= Levels.DEBUG) {
       this.write.apply(this, args);
     }
   }
 
-  info(...args: any[]) {
+  info(...args: unknown[]) {
     if (this.level <= Levels.INFO) {
       this.write.apply(this, args);
     }
   }
 
-  warn(...args: any[]) {
+  warn(...args: unknown[]) {
     if (this.level <= Levels.WARN) {
       this.write.apply(this, args);
     }
   }
 
-  error(...args: any[]) {
+  error(...args: unknown[]) {
     if (this.level <= Levels.ERROR) {
       this.write.apply(this, args);
     }
   }
 
-  fatal(...args: any[]) {
+  fatal(...args: unknown[]) {
     if (this.level <= Levels.FATAL) {
       this.write.apply(this, args);
     }

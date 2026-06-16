@@ -1,6 +1,6 @@
 import { getInformationSchema } from './information_schema';
 import { Document, Value } from '../types';
-import sprintf from '../sprintf';
+import sprintf, { ArgType } from '../sprintf';
 import { isPlainObject } from '../utils';
 
 export type Dialect = 'mysql' | 'postgres' | 'mssql' | 'oracle' | 'sqlite3' | 'generic';
@@ -31,16 +31,16 @@ export interface DialectEncoder {
 }
 
 export abstract class Connection implements DialectEncoder {
-  dialect: Dialect;
+  dialect!: Dialect;
   connection: any;
-  database: string;
-  queryCounter: QueryCounter;
+  database!: string;
+  queryCounter!: QueryCounter;
 
   abstract _query(sql: string, pk?: string): Promise<any>;
 
-  query<T = Document[]>(fmt: string, ...args) {
+  query<T = Document[]>(fmt: string, ...args: unknown[]) {
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
-    const sql = sprintf(fmt, val, this);
+    const sql = sprintf(fmt, val as ArgType, this);
     return this._query(sql) as Promise<T>;
   }
 
@@ -57,7 +57,7 @@ export abstract class Connection implements DialectEncoder {
   }
 
   abstract end(): Promise<void>;
-  abstract release();
+  abstract release(): void | Promise<void>;
 
   abstract escape(s: string): string;
   abstract escapeId(name: string): string;
@@ -81,8 +81,8 @@ export abstract class Connection implements DialectEncoder {
 }
 
 export abstract class ConnectionPool implements DialectEncoder {
-  dialect: Dialect;
-  database: string;
+  dialect!: Dialect;
+  database!: string;
 
   abstract getConnection(): Promise<Connection>;
   abstract end(): Promise<void>;

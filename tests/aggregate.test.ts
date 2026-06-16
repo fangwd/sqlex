@@ -15,7 +15,7 @@ describe('select with aggregate functions', () => {
     });
     expect(rows.length).toBeGreaterThan(0);
     // note: postgres returns count as a string
-    expect(+rows[0].count).toBeGreaterThan(0);
+    expect(+rows[0]!.count!).toBeGreaterThan(0);
     db.end();
   });
 
@@ -39,7 +39,7 @@ describe('select with aggregate functions', () => {
       groupBy: ['user.firstName', 'product.name'],
     });
     expect(rows.length).toBeGreaterThan(0);
-    expect(+rows[0].count).toBeGreaterThan(0);
+    expect(+rows[0]!.count!).toBeGreaterThan(0);
     db.end();
   });
 });

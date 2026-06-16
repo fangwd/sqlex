@@ -1,5 +1,29 @@
 import { Document } from './types';
 
+export type {
+  AnyDocument,
+  AnyTableSpec,
+  Document,
+  DocumentValue,
+  FilterShape,
+  JsonValue,
+  LooseTableSpec,
+  MutationOptions,
+  ParentMutation,
+  RelatedMutation,
+  ScalarValue,
+  SelectFields,
+  TableCreate,
+  TableFilter,
+  TableInsert,
+  TableMap,
+  TableRow,
+  TableSpec,
+  Identifiable,
+  TableUpdate,
+  Value,
+} from './types';
+
 export {
   Database,
   Table,
@@ -41,7 +65,7 @@ export {
 export { toArray } from './misc';
 export { selectTree } from './select';
 export { Record, RecordProxy } from './record';
-export { printSchema, exportSchemaJava, printSchemaTypeScript } from './print';
+export { printSchema, exportSchemaJava, printSchemaTypeScript, printSchemaTypeMap } from './print';
 export { JsonSerialiser, XstreamSerialiser } from './serialiser';
 export { decodeSurrogateKey, getDefaultSurrogateKeyFields, surrogateKeyToFields } from './loader';
 export { setMockStringPrefix } from './mock';

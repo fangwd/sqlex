@@ -3,6 +3,7 @@ import { Database } from '../src/database';
 import { Record } from '../src/record';
 
 import * as helper from './helper';
+import type { UserRow } from './schema-types';
 
 const NAME = 'flush';
 
@@ -65,7 +66,7 @@ test('save #1', async() => {
   const schema = new Schema(helper.getExampleData());
   const db = helper.connectToDatabase(NAME, schema);
   const user = db.getModels().User({ email: 'saved01@example.com' });
-  user.save().then(async row => {
+  user.save().then(async (row: UserRow) => {
     expect(row.email).toBe('saved01@example.com');
     const user = await db.table('user').get({ email: 'saved01@example.com' });
     expect(user.id).toBe(row.id);
@@ -298,9 +299,9 @@ test('flush #4', async() => {
       let order;
       for (const code of map[email]) {
         order = orders.find(x => x.code === code);
-        ok = ok && order.user.id === user.id;
+        ok = ok && order!.user!.id === user!.id;
       }
-      ok = ok && user.status === order.id;
+      ok = ok && user!.status === order!.id;
     }
     expect(ok).toBe(true);
     await db.end();
@@ -318,7 +319,8 @@ test('flush #5', async() => {
   try {
     order.dateCreated = '23-06-2017';
   } catch (error) {
-    expect(/Invalid time value/.test(error.message)).toBe(true);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(/Invalid time value/.test(message)).toBe(true);
     await db.flush();
   }
   await db.end();
@@ -460,7 +462,7 @@ test('replaceRecordsIn (1)', async() => {
   const alice = db.append('user', { email: 'alice' });
   const bob = db.append('user', { email: 'bob' });
 
-  const createOrders = user => {
+  const createOrders = (user: Record) => {
     for (let i = 1; i <= 3; i++) {
       const order = db
         .table('order')
@@ -513,7 +515,7 @@ test('replaceRecordsIn (2)', async() => {
   let alice = db.append('user', { email: 'alice' });
   let bob = db.append('user', { email: 'bob' });
 
-  const createOrders = user => {
+  const createOrders = (user: Record) => {
     for (let i = 1; i <= 3; i++) {
       const order = db
         .table('order')
@@ -574,7 +576,7 @@ test('replaceRecordsIn (2)', async() => {
   await db.end();
 });
 
-function createTestPosts(db: Database, user) {
+function createTestPosts(db: Database, user: Record) {
   const allPosts: Record[] = [];
   const allComments: any[] = [];
 

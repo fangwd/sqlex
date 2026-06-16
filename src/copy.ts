@@ -27,7 +27,7 @@ export function copyRecord(
 
 function buildTableFilters(
   record: Record,
-  options: CopyOptions,
+  options: CopyOptions | undefined,
   uniqueKeysOnly: boolean
 ): Map<Table, Filter> {
   const db = record.__table.db;
@@ -69,15 +69,16 @@ function buildTableFilters(
 
       if (field.relatedField && field.relatedField.throughField) {
         const related = field.relatedField;
-        const table = db.table(related.throughField.referencedField);
+        const throughField = related.throughField!;
+        const table = db.table(throughField.referencedField);
 
         let value: Filter = JSON.parse(JSON.stringify(filter));
 
-        if (!related.throughField.relatedField.throughField) {
+        if (!throughField.relatedField!.throughField) {
           value = { [field.name]: JSON.parse(JSON.stringify(filter)) };
         }
 
-        const name = related.throughField.relatedField.name;
+        const name = throughField.relatedField!.name;
 
         if (map.has(table)) {
           const current = map.get(table);
@@ -131,12 +132,12 @@ function buildTableFilters(
 }
 
 function selectRows(map: Map<Table, Filter>, db: Database) {
-  const promises = [];
+  const promises: Promise<Table>[] = [];
 
   map.forEach((filter, key) => {
     const promise = key.select('*', { where: filter }).then(rows => {
       const table = db.table(key.model);
-      rows.forEach(row => append(table, row));
+      rows.forEach((row: Document) => append(table, row));
       return table;
     });
     promises.push(promise);
@@ -164,7 +165,7 @@ function flushAll(db: Database) {
 function append(table: Table, row: Document) {
   const db = table.db;
   const model = table.model;
-  const key = model.keyField();
+  const key = model.keyField()!;
   const value = model.keyValue(row);
   const record = table.append({ [key.name]: value });
 
@@ -173,7 +174,7 @@ function append(table: Table, row: Document) {
   for (const field of model.fields) {
     if (field instanceof ForeignKeyField && row[field.name]) {
       const referencedTable = db.table(field.referencedField.model);
-      const key = referencedTable.model.keyField();
+      const key = referencedTable.model.keyField()!;
       const value = referencedTable.model.keyValue(row[field.name] as Document);
       const referencedRecord = referencedTable.append({ [key.name]: value });
       if (record[field.name] !== undefined) {
@@ -188,9 +189,13 @@ function append(table: Table, row: Document) {
   }
 }
 
+interface FilterNode {
+  [key: string]: FilterNode | Document;
+}
+
 function getFilter(table: Table, path: string, record: Record) {
   const fields = path.split('.');
-  const filter = {};
+  const filter: FilterNode = {};
 
   let result = filter;
   let model = table.model;
@@ -203,7 +208,7 @@ function getFilter(table: Table, path: string, record: Record) {
       throw Error(`Bad filter: ${path} (${name})`);
     }
     result[name] = {};
-    result = result[name];
+    result = result[name] as FilterNode;
     model = field.referencedField.model;
   }
 
@@ -228,7 +233,7 @@ function getFilter(table: Table, path: string, record: Record) {
   }
 
   result[name] = {};
-  result = result[name];
+  result = result[name] as FilterNode;
 
   for (let i = 0; i < shortest.length; i++) {
     name = shortest[i];
@@ -236,7 +241,7 @@ function getFilter(table: Table, path: string, record: Record) {
       result[name] = record.__data;
     } else {
       result[name] = {};
-      result = result[name];
+      result = result[name] as FilterNode;
     }
   }
 
@@ -268,11 +273,11 @@ function getPaths(
 export function getShortestPath(from: Model, to: Model): string[] {
   if (from === to) return [];
 
-  let result: string[] = null;
+  let result: string[] | null = null;
   for (const path of getPaths(from, to, new Set())) {
     if (!result || result.length > path.length) {
       result = path;
     }
   }
-  return result;
+  return result || [];
 }

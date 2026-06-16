@@ -61,10 +61,10 @@ export class Context {
     const field = builder.field;
     const names: string[] = [];
     while (builder.parent) {
-      names.unshift(builder.field.name);
+      names.unshift(builder.field!.name);
       builder = builder.parent;
     }
-    return this.getAlias(model, field, names);
+    return this.getAlias(model, field!, names);
   }
 
   getAlias(model: Model, field: Field, names: string[]) {
@@ -83,7 +83,7 @@ export class Context {
 
 type FieldEntry = {
   expr: string; // escaped
-  name: string; // non-escaped
+  name?: string; // non-escaped
   skip?: boolean;
 };
 
@@ -121,12 +121,12 @@ const DEFAULT_OPERATOR_MAP: OperatorMap = {
   [ILIKE]: 'ilike',
 };
 export class QueryBuilder {
-  model: Model;
+  model!: Model;
   field?: Field;
   parent?: QueryBuilder;
 
   dialect: DialectEncoder;
-  context?: Context;
+  context!: Context;
   alias: string;
   skipJoin?: boolean;
   froms?: string[];
@@ -137,7 +137,7 @@ export class QueryBuilder {
   getFroms() {
     let builder: QueryBuilder = this;
     while (builder && builder.field instanceof ForeignKeyField) {
-      builder = builder.parent;
+      builder = builder.parent!;
     }
     return builder.froms;
   }
@@ -148,7 +148,7 @@ export class QueryBuilder {
     if (!(model instanceof QueryBuilder)) {
       this.model = model;
       this.dialect = dialect as DialectEncoder;
-      this.operatorMap = {...DEFAULT_OPERATOR_MAP, ...operatorMap};
+      this.operatorMap = { ...DEFAULT_OPERATOR_MAP, ...operatorMap };
       this.context = new Context();
       if (model instanceof TableModel) {
         this.alias = model.table.name;
@@ -160,6 +160,9 @@ export class QueryBuilder {
             model: model.db.model(model.aliasMap[key]),
           };
         }
+      }
+      if (this.dialect.dialect !== 'postgres') {
+        this.operatorMap['ilike'] = 'like';
       }
     } else {
       this.parent = model;
@@ -181,7 +184,7 @@ export class QueryBuilder {
   where(args: Filter): string {
     if (!args) return '';
     if (!this.having) {
-      args = plainify(args);
+      args = plainify(args) as Filter;
     }
     if (Array.isArray(args)) {
       return this.or(args);
@@ -214,7 +217,7 @@ export class QueryBuilder {
           break;
         }
         for (const key of keys) {
-          const value = arg[key];
+          const value = (arg as Document)[key];
           if (!keySet.has(key) || Array.isArray(value)) {
             useIn = false;
             break;
@@ -242,12 +245,12 @@ export class QueryBuilder {
             const tuple = keys
               .map((key, i) => {
                 const field = fields[i];
-                const value = arg[key];
+                const value = (arg as Document)[key];
                 const actual =
                   field instanceof ForeignKeyField && value && typeof value === 'object'
-                    ? value[field.referencedField.name]
+                    ? (value as Document)[field.referencedField.name]
                     : value;
-                return this.escape(field, actual);
+                return this.escape(field, actual as Value);
               })
               .join(',');
             return fields.length > 1 ? '(' + tuple + ')' : tuple;
@@ -275,19 +278,19 @@ export class QueryBuilder {
     for (const key in args) {
       const [name, operator] = this.splitKey(key);
       const field = this.having ? null : this.model.field(name);
-      const value = args[key];
+      const value = (args as Document)[key];
       if (field instanceof ForeignKeyField) {
         const query = value as Filter;
         if (query === null || typeof query !== 'object') {
-          exprs.push(this.expr(field, operator || '=', value));
+          exprs.push(this.expr(field, operator || '=', value as Value));
         } else if (Array.isArray(query)) {
-          const values = [];
-          const filter = [];
-          for (const arg of query) {
+          const values: Value[] = [];
+          const filter: Document[] = [];
+          for (const arg of query as (Value | Document)[]) {
             if (arg === null || typeof arg !== 'object') {
-              values.push(arg);
+              values.push(arg as Value);
             } else {
-              filter.push(arg);
+              filter.push(arg as Document);
             }
           }
           let expr = values.length > 0 ? this.expr(field, 'in', values) : 'false';
@@ -333,13 +336,13 @@ export class QueryBuilder {
           }
         }
       } else if (field instanceof SimpleField) {
-        exprs.push(this.expr(field, operator, value));
+        exprs.push(this.expr(field, operator, value as Value | Value[]));
       } else if (field instanceof RelatedField) {
         const filter = value === '*' ? {} : (value as Filter);
         exprs.push(this.exists(field, operator, filter));
       } else if (key === AND) {
         // { and: [{name_like: "%Apple%"}, {price_lt: 6}] }
-        exprs.push(value.map((c) => this.and(c)).join(' and '));
+        exprs.push((value as Document[]).map((c) => this.and(c)).join(' and '));
       } else if (key === OR) {
         /*
          { or: [
@@ -350,7 +353,7 @@ export class QueryBuilder {
               ]
          }
          */
-        exprs.push('(' + value.map((c) => this.and(c)).join(' or ') + ')');
+        exprs.push('(' + (value as Document[]).map((c) => this.and(c)).join(' or ') + ')');
       } else if (key === NOT) {
         /*
          { not: [
@@ -361,16 +364,16 @@ export class QueryBuilder {
               ]
          }
          */
-        const filters = toArray(value);
+        const filters = toArray(value as Document | Document[]);
         exprs.push('not (' + filters.map((c) => this.and(c)).join(' or ') + ')');
       } else if (field instanceof ComputedField) {
-        exprs.push(this.expr(field, operator, value));
+        exprs.push(this.expr(field, operator, value as Value | Value[]));
       } else if (this.having) {
         const lhs = this.having.fieldMap[name].expr;
         const rhs =
           typeof value === 'number' || typeof value === 'boolean'
             ? value
-            : this.dialect.escape(value);
+            : this.dialect.escape(value as string);
         exprs.push(`${lhs} ${operator} ${rhs}`);
       } else if (name !== '*') {
         throw Error(`Bad field: ${this.model.name}.${name}`);
@@ -383,7 +386,7 @@ export class QueryBuilder {
       : exprs.map((x) => `(${x})`).join(' and ');
   }
 
-  private expr(field: SimpleField | ComputedField, operator: string, value: Value | Value[]) {
+  private expr(field: SimpleField | ComputedField, operator: string | null, value: Value | Value[]) {
     const lhs =
       field instanceof ComputedField
         ? this.escapeId(field.name)
@@ -425,10 +428,10 @@ export class QueryBuilder {
   _extendFilter(filter: Filter, orderBy: OrderBy): Filter {
     for (const entry of toArray(orderBy)) {
       const fields = entry.replace(/^-/, '').split('.');
-      let result = filter;
-      let model, start;
+      let result = filter as Document;
+      let model: TableModel, start: number;
       if (this.model instanceof ViewModel) {
-        model = this.model.model(fields[0]);
+        model = this.model.model(fields[0])!;
         start = 1;
       } else {
         model = this.model;
@@ -448,7 +451,7 @@ export class QueryBuilder {
           if (!result[name]) {
             result[name] = {};
           }
-          result = result[name];
+          result = result[name] as Document;
           model = field.referencedField.model;
         }
       }
@@ -459,7 +462,7 @@ export class QueryBuilder {
   _resolveField(fullpath: string, flat?: boolean): { column: string; alias?: string } {
     const aliasMap = this.context.aliasMap;
     let alias,
-      field: Field,
+      field: Field | undefined,
       path = fullpath,
       model = this.model;
 
@@ -467,7 +470,7 @@ export class QueryBuilder {
       const match = /^([^\.]+)\.(.+)$/.exec(fullpath);
       if (match && this.model.model(match[1])) {
         path = match[2];
-        model = this.model.model(match[1]);
+        model = this.model.model(match[1])!;
       }
     }
 
@@ -535,11 +538,11 @@ export class QueryBuilder {
     if (!(name instanceof Field || typeof name === 'string')) {
       if (Array.isArray(name)) {
         for (const ast of name) {
-          extendByAst(this.model, filter, ast);
+          extendByAst(this.model, filter as Document, ast);
         }
       } else {
         // { code: 'ID', user: { firstName: 'name' } }
-        extendFilter(this.model, filter, name as Document);
+        extendFilter(this.model, filter as Document, name as Document);
       }
     }
 
@@ -601,7 +604,7 @@ export class QueryBuilder {
         } else if (ast instanceof StarNode) {
           const view = this.model as ViewModel;
           for (const key in view.aliasMap) {
-            const model = view.model(key);
+            const model = view.model(key)!;
             for (const field of model.fields) {
               if (field instanceof SimpleField) {
                 const prefix = this.dialect.escapeId(key);
@@ -618,7 +621,7 @@ export class QueryBuilder {
           name = ast.alias;
         } else if (ast.kind === Kind.NAME) {
           const field = this.model.field((ast as NameNode).name);
-          name = field.name;
+          name = field!.name;
         }
         fields.push({ name, expr });
       });
@@ -651,8 +654,10 @@ export class QueryBuilder {
     let havingPart = undefined;
     if (having) {
       this.having = {
-        fieldMap: fields.reduce((map, field) => {
-          map[field.name] = field;
+        fieldMap: fields.reduce<{ [key: string]: (typeof fields)[number] }>((map, field) => {
+          if (field.name !== undefined) {
+            map[field.name] = field;
+          }
           return map;
         }, {}),
       };
@@ -671,7 +676,7 @@ export class QueryBuilder {
         .join(', '),
       tables: this.froms.join(' left join '),
       where,
-      orderBy: orderBy ? (orderBy as string[]).join(', ') : null,
+      orderBy: orderBy ? (orderBy as string[]).join(', ') : undefined,
       groupBy: groupByPart,
       having: havingPart,
     };
@@ -687,11 +692,11 @@ export class QueryBuilder {
       filterThunk,
       having,
     }: SelectOptions & {
-      filterThunk?: (QueryBuilder) => string;
+      filterThunk?: (builder: QueryBuilder) => string;
     }
   ): string {
     const query = this._select(
-      Array.isArray(name) ? name.map((entry) => (raw ? parseFlat(entry) : parse(entry))) : name,
+      Array.isArray(name) ? name.map((entry) => (raw ? parseFlat(entry) : parse(entry)!)) : name,
       { where, orderBy, groupBy, having }
     );
     let sql = `select ${query.fields} from ${query.tables}`;
@@ -743,9 +748,9 @@ export class QueryBuilder {
     const builder = new QueryBuilder(this, field);
     const model = field.referencedField.model;
     const keys = Object.keys(args);
-    if (keys.length === 1 && keys[0] === model.keyField().name) {
-      if (isValue(args[keys[0]])) {
-        return this.expr(field, null, args[keys[0]]);
+    if (keys.length === 1 && keys[0] === model.keyField()!.name) {
+      if (isValue((args as Document)[keys[0]])) {
+        return this.expr(field, null, (args as Document)[keys[0]] as Value);
       }
     }
 
@@ -753,7 +758,7 @@ export class QueryBuilder {
       const name = `${this.escapeId(model.table.name)} ${builder.alias}`;
       const lhs = this.encodeField(field);
       const rhs = builder.encodeField(field.referencedField.column.name);
-      this.getFroms().push(`${name} on ${lhs}=${rhs}`);
+      this.getFroms()!.push(`${name} on ${lhs}=${rhs}`);
     }
 
     return builder.where(args);
@@ -763,11 +768,11 @@ export class QueryBuilder {
     const builder = new QueryBuilder(this, field);
     const model = field.referencedField.model;
     const keys = Object.keys(args);
-    if (keys.length === 1 && keys[0] === model.keyField().name) {
-      return this.expr(field, null, args[keys[0]]);
+    if (keys.length === 1 && keys[0] === model.keyField()!.name) {
+      return this.expr(field, null, (args as Document)[keys[0]] as Value);
     }
     const lhs = this.encodeField(field.column.name);
-    const rhs = builder.select(model.keyField().column.name, { where: args });
+    const rhs = builder.select(model.keyField()!.column.name, { where: args });
     return `${lhs} in (${rhs})`;
   }
 
@@ -831,7 +836,7 @@ export function encodeFilter(args: Filter, model: Model, escape: DialectEncoder)
   return builder.where(args);
 }
 
-export function plainify(value) {
+export function plainify(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.filter((entry) => entry !== undefined).map((entry) => plainify(entry));
   } else if (isValue(value)) {
@@ -839,14 +844,15 @@ export function plainify(value) {
   } else if (value instanceof Record) {
     const model = value.__table.model;
     if (value.__primaryKey()) {
-      return { [model.keyField().name]: value.__primaryKey() };
+      return { [model.keyField()!.name]: value.__primaryKey() };
     } else {
       return getUniqueFields(model, value.__data);
     }
   } else {
-    const result = {};
-    for (const key in value) {
-      result[key] = plainify(value[key]);
+    const result: { [key: string]: unknown } = {};
+    const record = value as { [key: string]: unknown };
+    for (const key in record) {
+      result[key] = plainify(record[key]);
     }
     return result;
   }
@@ -855,17 +861,17 @@ export function plainify(value) {
 function pkOnly(doc: Document | string, field: ForeignKeyField) {
   const model = field.referencedField.model;
   if (typeof doc === 'string') {
-    return doc === model.keyField().name;
+    return doc === model.keyField()!.name;
   }
   if (doc && !isValue(doc)) {
     const keys = Object.keys(doc);
-    return keys.length === 1 && keys[0] === model.keyField().name;
+    return keys.length === 1 && keys[0] === model.keyField()!.name;
   }
   return false;
 }
 
 // Extends the filter to include foreign key fields
-function extendFilter(model: Model, filter: Filter, fields: Document) {
+function extendFilter(model: Model, filter: Document, fields: Document) {
   for (const name in fields) {
     const value = fields[name] === '*' ? {} : fields[name];
     if (value && typeof value === 'object') {
@@ -875,16 +881,16 @@ function extendFilter(model: Model, filter: Filter, fields: Document) {
           filter[name] = {};
         }
         if (fields[name] === '*' || !pkOnly(value as Document, field)) {
-          filter[name]['*'] = true;
+          (filter[name] as Document)['*'] = true;
         }
-        extendFilter(field.referencedField.model, filter[name] as Filter, value as Document);
+        extendFilter(field.referencedField.model, filter[name] as Document, value as Document);
       }
     }
   }
 }
 
 // name: order.user.email
-function extendByFieldName(model: Model, filter: Filter, dotted: string) {
+function extendByFieldName(model: Model, filter: Document, dotted: string) {
   let dot = dotted.indexOf('.');
 
   if (dot < 0) {
@@ -906,13 +912,13 @@ function extendByFieldName(model: Model, filter: Filter, dotted: string) {
       filter[name] = {};
     }
     if (!pkOnly(doc, field)) {
-      filter[name]['*'] = true;
+      (filter[name] as Document)['*'] = true;
     }
-    extendByFieldName(field.referencedField.model, filter[name], doc);
+    extendByFieldName(field.referencedField.model, filter[name] as Document, doc);
   }
 }
 
-function extendByAst(model: Model, filter: Filter, ast: AST) {
+function extendByAst(model: Model, filter: Document, ast: AST) {
   if (ast.kind === Kind.FLAT) {
     const flat = ast as FlatNode;
     for (const token of flat.tokens) {
@@ -946,8 +952,8 @@ function extendByAst(model: Model, filter: Filter, ast: AST) {
   }
 }
 
-function getFields(model: Model, input: string | Document, fieldMap: FieldMap, prefix?: string) {
-  let result = [];
+function getFields(model: Model, input: string | Document, fieldMap: FieldMap, prefix?: string): string[] {
+  let result: string[] = [];
 
   const getKey = (name: string) => (prefix ? `${prefix}.${name}` : name);
 
@@ -964,7 +970,7 @@ function getFields(model: Model, input: string | Document, fieldMap: FieldMap, p
 
   for (const name in input as Document) {
     const key = getKey(name);
-    const value = input[name];
+    const value = (input as Document)[name];
 
     if (!value) {
       const index = result.indexOf(key);

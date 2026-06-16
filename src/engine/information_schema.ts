@@ -7,6 +7,8 @@ import {
 } from '../types';
 import { lower, queryInformationSchema as query } from './util';
 
+type KeyColumn = [columnName: string, reference: [string, string]];
+
 export function getInformationSchema(
   connection: Connection,
   catalogName: string,
@@ -44,7 +46,7 @@ class Builder {
         tableConstraintColumnsMap
       ] = result;
 
-      const schemaInfo = {
+      const schemaInfo: SchemaInfo = {
         name: this.schemaName,
         tables: []
       };
@@ -97,11 +99,11 @@ class Builder {
         } and table_type = 'BASE TABLE'
         `
     ).then(rows => {
-      const set = new Set();
+      const set = new Set<string>();
       for (const row of rows) {
-        set.add(row.table_name);
+        set.add(row.table_name as string);
       }
-      return set as any;
+      return set;
     });
   }
 
@@ -114,25 +116,28 @@ class Builder {
         from information_schema.columns
         where table_schema = ${this.escapedSchemaName}`
     ).then(rows => {
-      const map = {};
+      const ordered: { [key: string]: [number, ColumnInfo][] } = {};
       for (const row of rows) {
-        map[row.table_name] = map[row.table_name] || [];
+        const tableName = row.table_name as string;
+        ordered[tableName] = ordered[tableName] || [];
         const columnInfo: ColumnInfo = {
-          name: row.column_name,
-          type: row.data_type,
+          name: row.column_name as string,
+          type: row.data_type as string,
           nullable: row.is_nullable === 'YES'
         };
         if (/char|text/i.exec(columnInfo.type)) {
-          columnInfo.size = row.character_maximum_length;
+          columnInfo.size = row.character_maximum_length as number;
         }
-        if (/auto_increment/i.exec(row.extra)) {
+        if (/auto_increment/i.exec(row.extra as string)) {
           columnInfo.autoIncrement = true;
         }
-        map[row.table_name].push([row.ordinal_position, columnInfo]);
+        ordered[tableName].push([row.ordinal_position as number, columnInfo]);
       }
-      for (const tableName in map) {
-        const columns = map[tableName];
-        map[tableName] = columns.sort((a, b) => a[0] - b[0]).map(r => r[1]);
+      const map: { [key: string]: ColumnInfo[] } = {};
+      for (const tableName in ordered) {
+        map[tableName] = ordered[tableName]
+          .sort((a, b) => a[0] - b[0])
+          .map(r => r[1]);
       }
       return map;
     });
@@ -147,18 +152,21 @@ class Builder {
         from information_schema.table_constraints
         where table_schema = ${this.escapedSchemaName}`
     ).then(rows => {
-      const map = {};
+      const map: { [key: string]: { [key: string]: string } } = {};
       for (let row of rows) {
         row = lower(row);
-        map[row.table_name] = map[row.table_name] || {};
-        map[row.table_name][row.constraint_name] = row.constraint_type;
+        const tableName = row.table_name as string;
+        map[tableName] = map[tableName] || {};
+        map[tableName][row.constraint_name as string] = row.constraint_type as string;
       }
       return map;
     });
   }
 
   // table_name => constraint_name => column_name[]
-  getKeyColumnUsage(): Promise<{ [key: string]: { [key: string]: string[] } }> {
+  getKeyColumnUsage(): Promise<{
+    [key: string]: { [key: string]: KeyColumn[] };
+  }> {
     return query(
       this.connection,
       `
@@ -167,21 +175,29 @@ class Builder {
         from information_schema.key_column_usage
         where table_schema = ${this.escapedSchemaName}`
     ).then(rows => {
-      const map = {};
+      const ordered: {
+        [key: string]: { [key: string]: [number, string, [string, string]][] };
+      } = {};
       for (const row of rows) {
-        map[row.table_name] = map[row.table_name] || {};
-        map[row.table_name][row.constraint_name] =
-          map[row.table_name][row.constraint_name] || [];
-        map[row.table_name][row.constraint_name].push([
-          row.ordinal_position,
-          row.column_name,
-          [row.referenced_table_name, row.referenced_column_name]
+        const tableName = row.table_name as string;
+        const constraintName = row.constraint_name as string;
+        ordered[tableName] = ordered[tableName] || {};
+        ordered[tableName][constraintName] =
+          ordered[tableName][constraintName] || [];
+        ordered[tableName][constraintName].push([
+          row.ordinal_position as number,
+          row.column_name as string,
+          [
+            row.referenced_table_name as string,
+            row.referenced_column_name as string
+          ]
         ]);
       }
-      for (const tableName in map) {
-        for (const constraintName in map[tableName]) {
-          const columns = map[tableName][constraintName];
-          map[tableName][constraintName] = columns
+      const map: { [key: string]: { [key: string]: KeyColumn[] } } = {};
+      for (const tableName in ordered) {
+        map[tableName] = {};
+        for (const constraintName in ordered[tableName]) {
+          map[tableName][constraintName] = ordered[tableName][constraintName]
             .sort((a, b) => a[0] - b[0])
             .map(r => [r[1], r[2]]);
         }

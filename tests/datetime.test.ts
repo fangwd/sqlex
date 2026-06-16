@@ -12,7 +12,7 @@ describe('datetime', () => {
     const inputDate = new Date();
     await table.mock({ id: 100, serviceTime: inputDate });
     const row = (await table.select('*', { where: { id: 100 } }))[0];
-    const outputDate = new Date(row.serviceTime as string);
+    const outputDate = new Date(row.serviceTime as unknown as string);
     // MySQL seems to be rounding the fractional part of a datetime when selected
     expect(Math.round(inputDate.getTime() / 1000)).toBe(Math.round(outputDate.getTime() / 1000));
     await db.cleanup();

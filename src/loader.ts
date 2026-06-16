@@ -1,7 +1,7 @@
 import { Table } from './database';
 import { Record } from './record';
 import { ForeignKeyField, RelatedField, Field, SimpleField, getLeafModel, Model } from './schema';
-import { Document, Value } from './types';
+import { Document, DocumentValue, Value } from './types';
 import { deepCopy } from './utils';
 export interface RecordConfig {
   [key: string]: string | string[];
@@ -28,7 +28,7 @@ function append(
     if (value === undefined) continue;
 
     if (key in fields) {
-      const setField = selector => {
+      const setField = (selector: string) => {
         let _model = model;
         let _row = row;
         let _defaults = defaults;
@@ -42,7 +42,7 @@ function append(
           if (row) {
             _row = row;
           } else {
-            _row  = getRecordField(_row, _model.field(names[i]));
+            _row  = getRecordField(_row, _model.field(names[i])!);
             _row.__path = path;
             rowMap.set(path, _row);
             if (_model.field(names[i]) instanceof RelatedField && _defaults) {
@@ -213,11 +213,15 @@ export async function loadTable(
   return { complete, _id: key };
 }
 
+interface ConfigNode {
+  [key: string]: string | ConfigNode | { fields: ConfigNode };
+}
+
 export function recordConfigToDocument(
   table: Table,
   config: RecordConfig
 ): Document {
-  const result = {};
+  const result: ConfigNode = {};
 
   for (const name in config) {
     let selector: string;
@@ -233,7 +237,7 @@ export function recordConfigToDocument(
     let fields = result;
 
     for (let i = 0; i < names.length - 1; i++) {
-      const field = model.field(names[i]);
+      const field = model.field(names[i])!;
       if (field instanceof ForeignKeyField) {
         model = field.referencedField.model;
       } else {
@@ -248,25 +252,25 @@ export function recordConfigToDocument(
         if (!fields[field.name]) {
           fields[field.name] = { fields: {} };
         }
-        fields = fields[field.name].fields;
+        fields = (fields[field.name] as { fields: ConfigNode }).fields;
       } else {
         if (!fields[field.name]) {
           fields[field.name] = {};
         }
-        fields = fields[field.name];
+        fields = fields[field.name] as ConfigNode;
       }
     }
 
     fields[names[names.length - 1]] = names[names.length - 1];
   }
 
-  return result;
+  return result as Document;
 }
 
 export function mapDocument(doc: Document, config: RecordConfig): Document[] {
-  const result = [];
+  const result: Document[] = [];
   for (const entry of flatten(doc)) {
-    const item = {};
+    const item: Document = {};
     for (const name in config) {
       const path = Array.isArray(config[name]) ? config[name][0] : config[name];
       if (entry[path as string] !== undefined) {
@@ -278,13 +282,15 @@ export function mapDocument(doc: Document, config: RecordConfig): Document[] {
   return result;
 }
 
-function flatten(doc: Document) {
-  let result = [{}];
+type FlatEntry = { [key: string]: DocumentValue };
+
+function flatten(doc: Document): FlatEntry[] {
+  let result: FlatEntry[] = [{}];
 
   for (const name in doc) {
     const value = doc[name];
     if (Array.isArray(value)) {
-      const next = [];
+      const next: FlatEntry[] = [];
       if (value.length > 0) {
         for (const val of value) {
           const docs = flatten(val as Document);
@@ -304,7 +310,7 @@ function flatten(doc: Document) {
       }
     } else if (value && typeof value === 'object' && !(value instanceof Date)) {
       const docs = flatten(value as Document);
-      const next = [];
+      const next: FlatEntry[] = [];
       for (const doc of docs) {
         for (const res of result) {
           const ent = { ...res };
@@ -339,8 +345,8 @@ export class LoadingConfig {
     key: string;
     value: string;
   };
-  fieldMap: Map<string, SimpleField>; // selector -> field
-  surrogateKeys: string[];
+  fieldMap!: Map<string, SimpleField>; // selector -> field
+  surrogateKeys!: string[];
 
   constructor(public model: Model, config: LoadingOptions) {
     const { fields, defaults } = config;
@@ -427,21 +433,21 @@ export class LoadingConfig {
         if (field instanceof RelatedField) {
           if (field.throughField) {
             if (this.surrogateKeys.length === 0) {
-              this.addSurrogateKey(this.model.keyField().name);
+              this.addSurrogateKey(this.model.keyField()!.name);
             }
-            names.push(field.throughField.referencedField.model.keyField().name);
+            names.push(field.throughField.referencedField.model.keyField()!.name);
             this.addSurrogateKey(names)
             names.pop();
           } else if (i === path.length - 1) {
             const model = field.referencingField.model;
-            names.push(model.keyField().name);
+            names.push(model.keyField()!.name);
             this.addSurrogateKey(names)
             names.pop();
           }
         }
       }
       if (this.surrogateKeys.length === 0) {
-        this.addSurrogateKey(this.model.keyField().name);
+        this.addSurrogateKey(this.model.keyField()!.name);
       }
     }
   }
@@ -467,7 +473,7 @@ export class LoadingConfig {
     return row;
   }
 
-  decodeSurrogateKey(key: string): Array<{selector: string, field: SimpleField, value: string}> {
+  decodeSurrogateKey(key: string): Array<{selector: string, field: SimpleField, value: string} | null> {
     const values = key.split(';');
     return this.surrogateKeys.map((key, index) => {
       const value = values[index];
@@ -578,7 +584,7 @@ export function getDefaultSurrogateKeyFields(
   const result = [];
   for (const key of config.surrogateKeys) {
     const selector = config.fields[key] as string;
-    const field = config.fieldMap.get(selector);
+    const field = config.fieldMap.get(selector)!;
     result.push({
       table: table.db.table(field.model).name,
       field: field.name,

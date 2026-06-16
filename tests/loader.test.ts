@@ -1,5 +1,7 @@
 import * as helper from './helper';
 import { Database } from '../src/database';
+import type { Document } from '../src';
+import type { CategoryRow, OrderRow, ProductRow, UserRow } from './schema-types';
 
 const NAME = 'loader';
 
@@ -256,7 +258,7 @@ test('load many to many #1', async() => {
   expect(category).toBeTruthy();
 
   const rows = await db.table('product_category').select('*', {
-    where: { product: { id_in: [products[0].id as string, products[1].id as string] }, category }
+    where: { product: { id_in: [products[0].id, products[1].id] }, category }
   });
 
   expect(rows.length).toBe(2);
@@ -267,7 +269,12 @@ test('select related', async() => {
   const db = helper.connectToDatabase(NAME);
   const table = db.table('order');
 
-  const rows = await table.select({
+  type SelectedOrder = OrderRow & {
+    user: UserRow & { orders: OrderRow[] };
+    orderItems: Array<{ id: number; product: ProductRow & { categories: CategoryRow[] } }>;
+  };
+
+  const rows = await table.select<SelectedOrder>({
     user: { orders: { fields: { code: 'code' } } },
 
     orderItems: {
@@ -360,7 +367,7 @@ test('load many to many #2', async() => {
     '*': 'orders[code]'
   };
 
-  const data = [
+  const data: Document[] = [
     {
       email: 'test-user-1',
       x1: 'test-order-1',
@@ -434,7 +441,7 @@ test('load many to many #3', async() => {
   expect(products[1].sku).toBe('fancy-2');
 
   const rows = await db.table('product_category').select('*', {
-    where: { product: { id_in: [products[0].id as string, products[1].id as string] } }
+    where: { product: { id_in: [products[0].id, products[1].id] } }
   });
 
   expect(rows.length).toBe(4);
@@ -470,6 +477,6 @@ async function getCategoryWithProductsRowCount(db: Database) {
   const m = await db.table('product_category').count();
   const n = await db
     .table('product_category')
-    .count(null, 'distinct(category_id)');
+    .count(undefined, 'distinct(category_id)');
   return (await db.table('category').count()) + m - n;
 }

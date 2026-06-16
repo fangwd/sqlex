@@ -46,7 +46,7 @@ describe('fields', () => {
     expect(fields[2].name).toBe('customerEmail');
     expect(fields[5].name).toBe(fields2[1].name);
     // service_log.id to be shadowed by product.id
-    expect(view.field('id').model.name).toBe('Product');
+    expect(view.field('id')!.model.name).toBe('Product');
     db.end();
   });
 });

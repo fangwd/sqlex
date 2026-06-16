@@ -1,5 +1,4 @@
 import { Connection, QueryCounter, ConnectionPool, Dialect } from '.';
-import { Pool, Client, PoolClient, PoolConfig, ClientConfig } from 'pg';
 import {
   Database as SchemaInfo,
   Table as TableInfo,
@@ -11,13 +10,52 @@ import { lower, queryInformationSchema as query } from './util';
 import logger from '../logger';
 import { datetimeToString } from '../utils';
 
+// `pg` ships without bundled type declarations and `@types/pg` is not installed,
+// so describe the minimal surface used here to satisfy `noImplicitAny`.
+interface ClientConfig {
+  database?: string;
+  [key: string]: unknown;
+}
+interface PoolConfig extends ClientConfig {
+  connectionLimit?: number;
+  max?: number;
+}
+interface QueryResult {
+  command: string;
+  rowCount: number | null;
+  rows: { [key: string]: unknown }[];
+}
+interface Client {
+  connect(): Promise<void>;
+  query(sql: string): Promise<QueryResult>;
+  end(): Promise<void>;
+}
+interface PoolClient {
+  query(sql: string): Promise<QueryResult>;
+  release(): void;
+}
+interface Pool {
+  connect(): Promise<PoolClient>;
+  end(): Promise<void>;
+}
+interface Pg {
+  Pool: new (config?: PoolConfig) => Pool;
+  Client: new (config?: ClientConfig) => Client;
+}
+const { Pool, Client }: Pg = require('pg');
+
 export class _ConnectionPool extends ConnectionPool {
+  dialect: Dialect = 'postgres';
   pool: Pool;
 
   constructor(options: PoolConfig) {
     super();
-    this.pool = new Pool(options);
-    this.database = options.database;
+    const poolOptions =
+      options.connectionLimit !== undefined && options.max === undefined
+        ? { ...options, max: options.connectionLimit }
+        : options;
+    this.pool = new Pool(poolOptions);
+    this.database = options.database as string;
   }
 
   async getConnection(): Promise<Connection> {
@@ -54,9 +92,10 @@ export class _Connection extends Connection {
       this.connection = options as PoolClient;
       this.database = connected;
     } else {
-      this.connection = new Client(options as ClientConfig);
+      const config = options as ClientConfig;
+      this.connection = new Client(config);
       this.connection.connect();
-      this.database = options.database;
+      this.database = config.database as string;
     }
   }
 
@@ -87,7 +126,7 @@ export class _Connection extends Connection {
             };
         }
       })
-      .catch(error => {
+      .catch((error: unknown) => {
         throw error;
       });
   }
@@ -99,6 +138,7 @@ export class _Connection extends Connection {
     }
     else {
       client.release();
+      return Promise.resolve();
     }
   }
 
@@ -128,11 +168,12 @@ function escapeDate(date: Date) {
   return `'${ts}'`;
 }
 
-function valueOf(obj: any): Value {
+function valueOf(obj: unknown): Value {
   if (!obj || typeof obj !== 'object' || obj instanceof Date) {
-    return obj;
+    return obj as Value;
   }
-  return valueOf(obj[Object.keys(obj)[0]]);
+  const record = obj as { [key: string]: unknown };
+  return valueOf(record[Object.keys(record)[0]]);
 }
 
 type ColumnUsage = {
@@ -167,7 +208,7 @@ class SchemaBuilder {
     const columnUsageMap = await this.getKeyColumnUsage();
     const foreignKeyMap = await this.getForeignKeyMap();
 
-    const schemaInfo = {
+    const schemaInfo: SchemaInfo = {
       name: this.catalogName,
       tables: [],
     };
@@ -209,12 +250,12 @@ class SchemaBuilder {
   }
 
   async getTableMap() {
-    const rows = await query(this.connection, `
+    const rows = await query<{ table_name: string; table_type: string }>(this.connection, `
       select table_name, table_type
       from information_schema.tables
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
     `);
-    const map = {};
+    const map: { [key: string]: string } = {};
     for (const row of rows) {
       map[row.table_name] = row.table_type;
     }
@@ -224,13 +265,22 @@ class SchemaBuilder {
   async getColumns(): Promise<{ [key: string]: ColumnInfo[] }> {
     const enumMap = await this.getEnumMap();
     const tableMap = await this.getTableMap();
-    const rows = await query(this.connection, `
+    const rows = await query<{
+      table_name: string;
+      column_name: string;
+      ordinal_position: number;
+      column_default: string | null;
+      is_nullable: string;
+      data_type: string;
+      character_maximum_length: number | null;
+      udt_name: string;
+    }>(this.connection, `
       select table_name, column_name, ordinal_position, column_default,
       is_nullable, data_type, character_maximum_length, udt_name
       from information_schema.columns
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
     `);
-    const map = {};
+    const map: { [key: string]: Array<[number, ColumnInfo]> } = {};
     for (const row of rows) {
       const tableType = tableMap[row.table_name];
       if (!tableType || !/BASE TABLE/i.test(tableType)) {
@@ -246,7 +296,7 @@ class SchemaBuilder {
         if (/varying/i.test(row.data_type)) {
           columnInfo.type = 'varchar';
         }
-        columnInfo.size = row.character_maximum_length;
+        columnInfo.size = row.character_maximum_length ?? undefined;
       }
       else if (/USER-DEFINED/i.test(columnInfo.type)) {
         columnInfo.type = 'varchar';
@@ -261,34 +311,39 @@ class SchemaBuilder {
         }
         else {
           columnInfo.size = 255;
-          (columnInfo as any).udt = row.udt_name;
+          (columnInfo as ColumnInfo & { udt?: string }).udt = row.udt_name;
         }
       }
       else if (/^(big)?(int|long)/i.test(columnInfo.type)) {
-        if (/^nextval\(/i.exec(row.column_default)) {
+        if (row.column_default && /^nextval\(/i.exec(row.column_default)) {
           columnInfo.autoIncrement = true;
         }
         columnInfo.default = row.column_default;
       }
       map[row.table_name].push([row.ordinal_position, columnInfo]);
     }
+    const result: { [key: string]: ColumnInfo[] } = {};
     for (const tableName in map) {
       const columns = map[tableName];
-      map[tableName] = columns.sort((a, b) => a[0] - b[0]).map((r) => r[1]);
+      result[tableName] = columns.sort((a, b) => a[0] - b[0]).map((r) => r[1]);
     }
-    return map;
+    return result;
   }
 
   // table_name => constraint_name => constraint_type
   async getTableConstraints(): Promise<{ [key: string]: { [key: string]: string } }> {
-    const rows = await query(this.connection, `
+    const rows = await query<{
+      table_name: string;
+      constraint_name: string;
+      constraint_type: string;
+    }>(this.connection, `
       select table_name, constraint_name, constraint_type
       from information_schema.table_constraints
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName}
     `);
-    const map = {};
+    const map: { [key: string]: { [key: string]: string } } = {};
     for (let row of rows) {
-      row = lower(row);
+      row = lower<typeof row>(row);
       map[row.table_name] = map[row.table_name] || {};
       map[row.table_name][row.constraint_name] = row.constraint_type;
     }
@@ -297,7 +352,12 @@ class SchemaBuilder {
 
   // table_name -> constraint_name -> [{ column, position(_in_unique_constraint) }]
   async getKeyColumnUsage(): Promise<ColumnUsageMap> {
-    const rows = await query(this.connection, `
+    const rows = await query<{
+      constraint_name: string;
+      table_name: string;
+      column_name: string;
+      position_in_unique_constraint: number | null;
+    }>(this.connection, `
       select constraint_name, table_name, column_name,
              position_in_unique_constraint - 1 as position_in_unique_constraint
       from information_schema.key_column_usage
@@ -324,7 +384,12 @@ class SchemaBuilder {
 
   // table_name -> constraint_name -> [{ table, constraint }]
   async getForeignKeyMap(): Promise<ForeignKeyMap> {
-    const rows = await query(this.connection, `
+    const rows = await query<{
+      table_name: string;
+      constraint_name: string;
+      foreign_table_name: string;
+      unique_constraint_name: string;
+    }>(this.connection, `
       select distinct fk.table_name as table_name, rc.constraint_name,
           pk.table_name as foreign_table_name, rc.unique_constraint_name
       from
@@ -348,14 +413,18 @@ class SchemaBuilder {
   }
 
   async getEnumMap(): Promise<{ [key: string]: string[] }> {
-    const rows = await query(this.connection, `
+    const rows = await query<{
+      enum_schema: string;
+      enum_name: string;
+      enum_value: string;
+    }>(this.connection, `
       select n.nspname as enum_schema, t.typname as enum_name, e.enumlabel as enum_value
       from pg_type t
           join pg_enum e on t.oid = e.enumtypid
           join pg_catalog.pg_namespace n ON n.oid = t.typnamespace
       where n.nspname NOT IN ('pg_catalog', 'information_schema')
     `)
-    const result = {};
+    const result: { [key: string]: string[] } = {};
     for (const row of rows) {
       result[row.enum_name] = result[row.enum_name] || [];
       result[row.enum_name].push(row.enum_value);
@@ -366,10 +435,10 @@ class SchemaBuilder {
 }
 
 export default {
-  createConnectionPool: (options): ConnectionPool => {
+  createConnectionPool: (options: PoolConfig): ConnectionPool => {
     return new _ConnectionPool(options);
   },
-  createConnection: (options): Connection => {
+  createConnection: (options: ClientConfig | PoolClient): Connection => {
     return new _Connection(options);
   },
   SchemaBuilder,

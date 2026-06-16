@@ -1,4 +1,6 @@
 import * as helper from './helper';
+import type { Document } from '../src';
+import type { OrderSelected, OrderItemRow } from './schema-types';
 
 const NAME = 'copy';
 
@@ -9,9 +11,9 @@ test('copy', async() => {
   const db = helper.connectToDatabase(NAME);
   const order = db.getModels().Order({ id: 1 });
   await order.copy({ code: 'order-1-copy' });
-  const rows = await db.table('order').select({ orderItems: '*' }, { where: { code: 'order-1-copy' } });
+  const rows = await db.table('order').select<OrderSelected>({ orderItems: '*' }, { where: { code: 'order-1-copy' } });
   expect(rows.length).toBe(1);
-  expect((rows[0].orderItems as []).length).toBe(2);
+  expect((rows[0].orderItems as OrderItemRow[]).length).toBe(2);
   await db.end();
 });
 
@@ -36,7 +38,7 @@ test('replace', async() => {
   }
 
   {
-    const data = {
+    const data: Document = {
       id: 3,
       orders: [
         { id: 1, status: 10 },
@@ -54,7 +56,7 @@ test('replace', async() => {
   }
 
   {
-    const data = {
+    const data: Document = {
       id: 3,
       orders: [{ id: 1, status: 100 }, { code: 'order-3', status: 300 }]
     };
@@ -68,7 +70,7 @@ test('replace', async() => {
   }
 
   {
-    const data = {
+    const data: Document = {
       id: 3,
       orders: [
         {

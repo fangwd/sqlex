@@ -1,4 +1,4 @@
-import { SimpleField } from '../src/schema';
+import { Field, SimpleField } from '../src/schema';
 
 import * as helper from './helper';
 
@@ -14,7 +14,7 @@ test('query', async() => {
 
   {
     const users = await User.table.select('*');
-    const fields = User.fields.filter(field => field instanceof SimpleField);
+    const fields = User.fields.filter((field: Field) => field instanceof SimpleField);
     expect(Object.keys(users[0]).length).toBe(fields.length);
   }
 
@@ -31,11 +31,16 @@ test('query', async() => {
     });
 
     // Alice is an admin
-    const alice = users.find(user => user.email.startsWith('alice'));
+    const alice = users.find(
+      (user: { email: string; userGroups: { group: { name: string } }[]; orders: unknown[] }) =>
+        user.email.startsWith('alice')
+    );
     expect(alice.userGroups[0].group.name).toBe('ADMIN');
 
     // Grace has orders
-    const grace = users.find(user => user.email.startsWith('grace'));
+    const grace = users.find(
+      (user: { email: string; orders: unknown[] }) => user.email.startsWith('grace')
+    );
     expect(grace.orders.length).toBeGreaterThan(0);
   }
 
@@ -45,8 +50,9 @@ test('query', async() => {
     });
 
     // Grace has orders
-    const rows = items.filter(item =>
-      item.order.user.email.startsWith('grace')
+    const rows = items.filter(
+      (item: { order: { user: { email: string } } }) =>
+        item.order.user.email.startsWith('grace')
     );
 
     expect(rows.length).toBeGreaterThan(0);
@@ -60,7 +66,7 @@ test('query', async() => {
         }
       }
     });
-    const grace = users.find(user => user.email.startsWith('grace'));
+    const grace = users.find((user: { email: string }) => user.email.startsWith('grace'));
     expect(!!grace).toBe(true);
   }
 
@@ -96,11 +102,15 @@ test('query', async() => {
 
     const rows = await Category.table.select(fields);
 
-    const apple = rows.find(row => row.name === 'Apple');
+    const apple = rows.find(
+      (row: { name: string; products: { title: string }[] }) => row.name === 'Apple'
+    );
     expect(apple.products.length).toBe(1);
     expect(apple.products[0].title).toBe('Australian Apple');
 
-    const banana = rows.find(row => row.name === 'Banana');
+    const banana = rows.find(
+      (row: { name: string; products: { title: string }[] }) => row.name === 'Banana'
+    );
     expect(banana.products.length).toBe(1);
     expect(banana.products[0].title).toBe('Australian Banana');
   }
@@ -180,7 +190,7 @@ test('append #2', async() => {
 
   expect(comments.length).toBe(4);
 
-  const commentId = comments.find(entry => entry.content === content + '1').id;
+  const commentId = comments.find(entry => entry.content === content + '1')!.id;
   const replies = comments.filter(
     entry => entry.parent && (entry.parent as any).id === commentId
   );
@@ -214,7 +224,7 @@ test('select', async() => {
 
   const row = rows.find(row => row.post === null);
 
-  expect(row.content).toBe('#.2');
+  expect(row!.content).toBe('#.2');
 
   await db.end();
 });

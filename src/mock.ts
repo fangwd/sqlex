@@ -7,7 +7,7 @@ import { Record } from './record';
 export async function mock(table: Table, data: undefined, save?: boolean): Promise<Record>;
 export async function mock(table: Table, data: Document, save?: boolean): Promise<Record>;
 export async function mock(table: Table, data: Document[], save?: boolean): Promise<Record[]>;
-export async function mock(table: Table, data: Document | Document[], save = true) {
+export async function mock(table: Table, data: Document | Document[] | undefined, save = true) {
   if (Array.isArray(data)) {
     const records = [];
     for (const entry of data) {
@@ -133,7 +133,7 @@ const _next = {
   boolean: 1,
 };
 
-function getValue(type: DataType): Date | number | string | boolean {
+function getValue(type: DataType): Date | number | string | boolean | object {
   switch (type) {
     case 'Date':
       return new Date();
@@ -143,6 +143,8 @@ function getValue(type: DataType): Date | number | string | boolean {
       return config.stringPrefix + (_next.string++).toString(16);
     case 'boolean':
       return _next.boolean++ % 2 == 0;
+    case 'object':
+      return { mock: config.stringPrefix + (_next.string++).toString(16) };
   }
 }
 

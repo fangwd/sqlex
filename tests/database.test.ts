@@ -1,6 +1,7 @@
 import { Schema } from '../src/schema';
 import { Value } from '../src/types';
 import * as helper from './helper';
+import type { CategoryRow } from './schema-types';
 
 const NAME = 'database';
 
@@ -93,7 +94,7 @@ test('get fail', async() => {
     await table.get({ firstName: 'Alice' })
   }
   catch (error) {
-    reason = error;
+    reason = String(error);
   }
   expect(!!/Bad/i.test(reason)).toBe(true);
   await db.end();
@@ -189,6 +190,43 @@ test('upsert #2', done => {
   });
 });
 
+test('create / upsert / modify with returning', async() => {
+  const db = helper.connectToDatabase(NAME);
+  const table = db.table('order');
+
+  // create: returning expands a related row beyond the default foreign-key id
+  const created: any = await table.create(
+    {
+      user: { connect: { email: 'alice@example.com' } },
+      code: 'order-returning'
+    },
+    { returning: { user: '*' } }
+  );
+  expect(created.user.email).toBe('alice@example.com');
+
+  // upsert on the existing row (with update): returning all scalar columns
+  const upserted: any = await table.upsert(
+    {
+      user: { connect: { email: 'alice@example.com' } },
+      code: 'order-returning'
+    },
+    { status: 7 },
+    { returning: '*' }
+  );
+  expect(upserted.code).toBe('order-returning');
+  expect(upserted.status).toBe(7);
+
+  // modify: returning reflects the applied update
+  const modified: any = await table.modify(
+    { status: 9 },
+    { code: 'order-returning' },
+    { returning: { user: '*' } }
+  );
+  expect(modified.user.email).toBe('alice@example.com');
+
+  await db.end();
+});
+
 test('update related', async() => {
   expect.assertions(14);
 
@@ -221,11 +259,11 @@ test('update related', async() => {
 
   let row: any = await table.create(data);
 
-  let rows: any = await table.select('*');
+  let rows: CategoryRow[] = await table.select('*');
   expect(rows.length).toBe(rowCount + 3);
-  expect(rows.find(r => r.name === data.name).id).toBe(row.id);
-  expect(rows.find(r => r.name === 'Cucumber').parent.id).toBe(row.id);
-  expect(rows.find(r => r.name === 'Banana').parent.id).toBe(row.id);
+  expect(rows.find(r => r.name === data.name)!.id).toBe(row.id);
+  expect(rows.find(r => r.name === 'Cucumber')!.parent!.id).toBe(row.id);
+  expect(rows.find(r => r.name === 'Banana')!.parent!.id).toBe(row.id);
 
   // upsert child rows
   data = {
@@ -255,8 +293,8 @@ test('update related', async() => {
   row = await table.modify(data.data, data.where);
   rows = await table.select('*');
   expect(rows.length).toBe(rowCount);
-  expect(rows.find(r => r.name === 'Garlic').parent.id).toBe(row.id);
-  expect(rows.find(r => r.name === 'Chilli').parent.id).toBe(row.id);
+  expect(rows.find(r => r.name === 'Garlic')!.parent!.id).toBe(row.id);
+  expect(rows.find(r => r.name === 'Chilli')!.parent!.id).toBe(row.id);
 
   // update child rows
   data = {
@@ -284,8 +322,8 @@ test('update related', async() => {
 
   row = await table.modify(data.data, data.where);
   rows = await table.select('*');
-  expect(rows.find(r => r.name === 'Apple').parent.id).toBe(row.id);
-  expect(rows.find(r => r.name === 'Cucumber').parent.id).toBe(row.id);
+  expect(rows.find(r => r.name === 'Apple')!.parent!.id).toBe(row.id);
+  expect(rows.find(r => r.name === 'Cucumber')!.parent!.id).toBe(row.id);
 
   // delete child rows
   data = {
@@ -340,8 +378,8 @@ test('update related', async() => {
 
   row = await table.modify(data.data, data.where);
   rows = await table.select('*');
-  expect(rows.find(r => r.name === 'Apple').parent).toBe(null);
-  expect(rows.find(r => r.name === 'Banana').parent).toBe(null);
+  expect(rows.find(r => r.name === 'Apple')!.parent).toBe(null);
+  expect(rows.find(r => r.name === 'Banana')!.parent).toBe(null);
   await table.db.end();
 });
 

@@ -7,6 +7,7 @@ const {
   printSchema,
   exportSchemaJava,
   printSchemaTypeScript,
+  printSchemaTypeMap,
   XstreamSerialiser,
   selectTree,
   getReferencingFields,
@@ -25,6 +26,7 @@ const options = getopt([
   ['  ', '--export', true],
   ['  ', '--java', true],
   ['  ', '--typescript', true],
+  ['  ', '--typeMap', true],
   ['  ', '--path'],
   ['  ', '--package'],
   ['  ', '--select'],
@@ -86,6 +88,8 @@ const options = getopt([
     }
     if (options.java) {
       exportSchemaJava(schema, options);
+    } else if (options.typeMap) {
+      print(printSchemaTypeMap(schema));
     } else if (options.typescript) {
       print(printSchemaTypeScript(schema));
     } else {

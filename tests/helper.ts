@@ -11,6 +11,7 @@ import {
 import { Schema } from '../src/schema';
 import { Database } from '../src/database';
 import { datetimeToString } from '../src/utils';
+import type { SqlexTables } from './schema-types';
 
 export const DB_TYPE = process.env.DB_TYPE || 'mysql';
 const DB_HOST = process.env.DB_HOST || 'localhost';
@@ -21,21 +22,21 @@ const DB_NAME = process.env.DB_NAME || 'sqlex_test';
 const SCHEMA = fs.readFileSync('tests/data/schema.sql').toString();
 const DATA = fs.readFileSync('tests/data/data.sql').toString();
 
-function createSQLite3Database(name): Promise<void> {
+function createSQLite3Database(name: string): Promise<void> {
   const sqlite3 = require('sqlite3');
   const filename = `${DB_NAME}_${name}`;
   return new Promise(resolve => {
     function _create() {
       const db = new sqlite3.Database(filename);
       db.serialize(function () {
-        (SCHEMA + DATA).split(';').forEach(line => {
+        (SCHEMA + DATA).split(';').forEach((line: string) => {
           const stmt = line.replace(/auto_increment|--.*?(\n|$)/gi, '\n');
           if (stmt.trim() && !/^\s*alter/i.test(stmt)) {
             db.run(stmt);
           }
         });
       });
-      db.close(err => {
+      db.close((err: Error | null) => {
         if (err) throw err;
         _resolve();
       });
@@ -45,9 +46,9 @@ function createSQLite3Database(name): Promise<void> {
       resolve();
     }
 
-    fs.exists(filename, exists => {
+    fs.exists(filename, (exists: boolean) => {
       if (exists) {
-        fs.unlink(filename, err => {
+        fs.unlink(filename, (err: NodeJS.ErrnoException | null) => {
           if (err) throw err;
           _create();
         });
@@ -58,12 +59,12 @@ function createSQLite3Database(name): Promise<void> {
   });
 }
 
-function dropSQLite3Database(name): Promise<void> {
+function dropSQLite3Database(name: string): Promise<void> {
   const filename = `${DB_NAME}_${name}`;
   return new Promise(resolve => {
-    fs.access(filename, error => {
+    fs.access(filename, (error: NodeJS.ErrnoException | null) => {
       if (!error) {
-        fs.unlink(filename, err => {
+        fs.unlink(filename, (err: NodeJS.ErrnoException | null) => {
           if (err) throw err;
           resolve();
         });
@@ -117,14 +118,14 @@ export async function createPostgresDatabase(
   const sql = SCHEMA + (data ? DATA : '');
   const lines = sql
     .split(';')
-    .filter(line => line.trim())
-    .map(line =>
+    .filter((line: string) => line.trim())
+    .map((line: string) =>
       line
         .replace(/\bdatetime\b/g, 'timestamp(3)')
         .replace(/\buser\b/g, '"user"')
         .replace(/`/g, '"')
         .replace(/integer primary key auto_increment/, 'serial primary key')
-        .replace(/'(\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z)'/g, (_, ts) => `'${datetimeToString(new Date(ts))}'`)
+        .replace(/'(\d+-\d+-\d+T\d+:\d+:\d+\.\d+Z)'/g, (_: string, ts: string) => `'${datetimeToString(new Date(ts))}'`)
     );
 
   for (const line of lines) {
@@ -172,18 +173,18 @@ function createMySQLDatabase(name: string, data = true): Promise<any> {
     `create database ${database}`,
     `use ${database}`
   ].concat(sql.split(';')
-    .filter(line => line.trim())
-    .map(line => line.replace(/\b(\d+-\d+-\d+)T(\d+:\d+:\d+\.\d+)Z\b/g, '$1 $2'))
+    .filter((line: string) => line.trim())
+    .map((line: string) => line.replace(/\b(\d+-\d+-\d+)T(\d+:\d+:\d+\.\d+)Z\b/g, '$1 $2'))
   );
 
-  return serialise(line => {
+  return serialise((line: string) => {
     return new Promise((resolve, reject) => {
-      db.query(line, (error, results, fields) => {
-        if (error) reject(Error(error));
+      db.query(line, (error: unknown, results: unknown, fields: unknown) => {
+        if (error) reject(Error(error as string));
         resolve(results);
       });
     });
-  }, lines).then(results => { db.end(); return results });
+  }, lines).then((results: unknown) => { db.end(); return results });
 }
 
 function dropMySQLDatabase(name: string): Promise<void> {
@@ -197,7 +198,7 @@ function dropMySQLDatabase(name: string): Promise<void> {
   });
 
   return new Promise(resolve => {
-    db.query(`drop database if exists ${database}`, err => {
+    db.query(`drop database if exists ${database}`, (err: unknown) => {
       if (err) throw err;
       db.end();
       resolve();
@@ -217,7 +218,7 @@ function createMySQLConnection(name: string): Connection {
   });
 }
 
-function serialise(func, argv: any[]) {
+function serialise(func: (arg: string) => Promise<unknown>, argv: any[]) {
   return new Promise(resolve => {
     const results: any[] = [];
     let next = 0;
@@ -226,7 +227,7 @@ function serialise(func, argv: any[]) {
         resolve(results);
       } else {
         const args = argv[next++];
-        func(args).then(result => {
+        func(args).then((result: unknown) => {
           results.push(result);
           _resolve();
         });
@@ -304,12 +305,12 @@ export function createTestConnectionPool(name: string, poolSize?: number): Conne
   });
 }
 
-export function connectToDatabase(name: string, schema?: Schema, poolSize?: number): Database {
+export function connectToDatabase(name: string, schema?: Schema, poolSize?: number): Database<SqlexTables> {
   if (!schema) {
     schema = new Schema(getExampleData());
   }
   const pool = createTestConnectionPool(name, poolSize);
-  return new Database(pool, schema);
+  return new Database<SqlexTables>(pool, schema);
 }
 
 export function getId(length: number = 8) {
@@ -322,7 +323,7 @@ export function getDatabaseName(name: string): string {
   return `${DB_NAME}_${name}`;
 }
 
-function createGenericDatabase(name): Promise<void> {
+function createGenericDatabase(name: string): Promise<void> {
   const addon = require(process.env['SQLEX_DRIVER'] || './mydb');
   const filename = `${DB_NAME}_${name}`;
   if (fs.existsSync(filename)) {
@@ -331,7 +332,7 @@ function createGenericDatabase(name): Promise<void> {
   const connection = new addon.Connection('sqlite3://' + filename);
   const stmt = (SCHEMA.replace(/alter table.*?\n/i, '') + DATA).replace(/auto_increment|--.*?(\n|$)/gi, '\n');
   return new Promise(resolve => {
-    connection.query(stmt, err => {
+    connection.query(stmt, (err: unknown) => {
       if (err) {
         console.error(`Error: ${err} (${stmt})`);
         throw err;
@@ -341,12 +342,12 @@ function createGenericDatabase(name): Promise<void> {
   })
 }
 
-function dropGenericDatabase(name): Promise<void> {
+function dropGenericDatabase(name: string): Promise<void> {
   const filename = `${DB_NAME}_${name}`;
   return new Promise(resolve => {
-    fs.access(filename, error => {
+    fs.access(filename, (error: NodeJS.ErrnoException | null) => {
       if (!error) {
-        fs.unlink(filename, err => {
+        fs.unlink(filename, (err: NodeJS.ErrnoException | null) => {
           if (err) throw err;
           resolve();
         });

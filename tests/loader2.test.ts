@@ -1,5 +1,6 @@
 import helper = require('./helper');
 import { LoadingConfig } from '../src/loader';
+import type { CategoryRow, ProductRow } from './schema-types';
 
 const NAME = 'loader2';
 
@@ -51,7 +52,7 @@ describe('table.connect', () => {
     const products = await db.table('product').select('*');
     expect(products.length).toBe(productCount + 1);
     const inserted = products.find((p) => p.sku === 'loader-product-1');
-    expect(inserted.id).toBeGreaterThan(0);
+    expect(inserted!.id).toBeGreaterThan(0);
 
     const items = await db.table('order_item').select('*');
     expect(items.length).toBe(itemCount);
@@ -63,7 +64,7 @@ describe('table.connect', () => {
 describe('surrogate keys', () => {
   it('should add key for related fields without through fields', () => {
     const db = helper.connectToDatabase(NAME);
-    const model = db.schema.model('order');
+    const model = db.schema.model('order')!;
     const fields = {
       product: 'orderItems.product.name',
     };
@@ -74,7 +75,7 @@ describe('surrogate keys', () => {
 
   it('should add keys for related fields with through fields', () => {
     const db = helper.connectToDatabase(NAME);
-    const model = db.schema.model('category');
+    const model = db.schema.model('category')!;
     const fields = {
       name: 'name',
       parent_name: 'parent.name',
@@ -89,7 +90,7 @@ describe('surrogate keys', () => {
 
   it('should add key when root model is a leaf model', () => {
     const db = helper.connectToDatabase(NAME);
-    const model = db.schema.model('category');
+    const model = db.schema.model('category')!;
     const fields = {
       categoryName: 'name',
       parent_name: 'parent.name',
@@ -103,7 +104,7 @@ describe('surrogate keys', () => {
 
   it('should add key for multi-level related fields', () => {
     const db = helper.connectToDatabase(NAME);
-    const model = db.schema.model('category');
+    const model = db.schema.model('category')!;
     const fields = {
       categoryName: 'name',
       parent_id: 'products.id',
@@ -184,7 +185,10 @@ describe('loading', () => {
 
     const id = await table.xappend(data1, config, { categories: { parent: 1 } });
     const keys = id.split(';').map(value => +value);
-    const row = await table.first({ categories: '*' }, { id: keys[0] });
+    const row = await table.first<ProductRow & { categories: CategoryRow[] }>(
+      { categories: '*' },
+      { id: keys[0] }
+    );
     expect(row.name).toBe('Product 1');
     expect((row.categories as any).length).toBe(1);
     expect(row.categories[0].name).toBe('Fancy');
@@ -213,8 +217,8 @@ describe('loading', () => {
     const rows = await table.select('*', { where: { id: keys } });
     expect(rows.length).toBe(2);
     const first = rows.find((r) => r.name === 'Example AX1');
-    const second = rows.find((r) => r.id === (first.parent as any).id);
-    expect(second.name).toBe('Example AX1 Parent');
+    const second = rows.find((r) => r.id === (first!.parent as any).id);
+    expect(second!.name).toBe('Example AX1 Parent');
     db.end();
   });
 });

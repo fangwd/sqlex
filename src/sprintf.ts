@@ -146,8 +146,8 @@ export default function sprintf(
     if (token.type === 'literal') {
       result.push(token.text);
     } else {
-      const key = token.name ? token.name : next++;
-      const value: Value = args[key];
+      const key: string | number = token.name ? token.name : next++;
+      const value = (args as { [key: string]: Value | Value[] })[key] as Value;
       if (value === undefined) {
         throw Error(`Missing argument ${key}`);
       }
@@ -157,7 +157,7 @@ export default function sprintf(
   return result.join('');
 }
 
-function toString(value: Value, encoder: DialectEncoder) {
+function toString(value: Value | Value[], encoder: DialectEncoder): string {
   if (Array.isArray(value)) {
     return value.map((entry) => toString(entry, encoder)).join(', ');
   }

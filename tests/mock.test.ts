@@ -30,7 +30,7 @@ describe('mock', () => {
     expect(typeof order.code).toBe('string');
     const orders = await db.table('order').select('*', { where: { id: order.id } });
     expect(orders.length).toBe(1);
-    expect(new Date(orders[0].dateCreated as string).getFullYear()).toBe(2020);
+    expect(new Date(orders[0].dateCreated as unknown as string).getFullYear()).toBe(2020);
     await db.cleanup();
     db.end();
   });
@@ -66,7 +66,7 @@ describe('mock', () => {
       .table('product')
       .select('*', { where: { id: items.map((i) => (i.product as any).id) } });
     expect(products.length).toBe(2);
-    expect(+products[0].price === 0 || +products[1].price === 0).toBe(true);
+    expect(+products[0].price! === 0 || +products[1].price! === 0).toBe(true);
     expect(typeof products[0].sku).toBe('string');
     expect(typeof products[1].sku).toBe('string');
     await db.cleanup();
@@ -108,7 +108,7 @@ describe('mock', () => {
       .select('*', { where: { id: productCategories.map((i) => (i.product as any).id) } });
 
     expect(products.length).toBe(2);
-    expect(+products[0].price === 0 || +products[1].price === 0).toBe(true);
+    expect(+products[0].price! === 0 || +products[1].price! === 0).toBe(true);
     await db.cleanup();
     db.end();
   });
@@ -180,12 +180,12 @@ describe('connecting mocked to existing', () => {
 });
 
 function updateFieldsNullability(db: Database) {
-  (db.schema.model('order').field('code') as SimpleField).column.nullable = false;
-  (db.schema.model('order_item').field('product') as SimpleField).column.nullable = false;
-  (db.schema.model('order_item').field('order') as SimpleField).column.nullable = false;
-  (db.schema.model('product').field('sku') as SimpleField).column.nullable = false;
-  (db.schema.model('post').field('user') as SimpleField).column.nullable = false;
-  (db.schema.model('product_category').field('product') as SimpleField).column.nullable = false;
-  (db.schema.model('product_category').field('category') as SimpleField).column.nullable = false;
-  (db.schema.model('store').field('name') as SimpleField).column.nullable = false;
+  (db.schema.model('order')!.field('code') as SimpleField).column.nullable = false;
+  (db.schema.model('order_item')!.field('product') as SimpleField).column.nullable = false;
+  (db.schema.model('order_item')!.field('order') as SimpleField).column.nullable = false;
+  (db.schema.model('product')!.field('sku') as SimpleField).column.nullable = false;
+  (db.schema.model('post')!.field('user') as SimpleField).column.nullable = false;
+  (db.schema.model('product_category')!.field('product') as SimpleField).column.nullable = false;
+  (db.schema.model('product_category')!.field('category') as SimpleField).column.nullable = false;
+  (db.schema.model('store')!.field('name') as SimpleField).column.nullable = false;
 }

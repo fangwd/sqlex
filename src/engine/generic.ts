@@ -2,8 +2,8 @@ import { Connection, QueryCounter, ConnectionPool, Dialect } from '.';
 import logger from '../logger';
 
 interface PoolOptions {
-  connectionLimit: number;
-  connectionWait: number;
+  connectionLimit?: number;
+  connectionWait?: number;
   driver: string;
   database: string;
 }
@@ -58,7 +58,7 @@ export class GenericPool<Resource extends { end: () => void; history: QueryHisto
   }
 
   assign(client: Client<Resource>) {
-    const item = this.idle.shift();
+    const item = this.idle.shift()!;
     this.busy.push(item);
     client.resolve(item);
   }
@@ -71,7 +71,7 @@ export class GenericPool<Resource extends { end: () => void; history: QueryHisto
     }
     this.idle.push(item);
     if (this.queue.length > 0) {
-      const client = this.queue.shift();
+      const client = this.queue.shift()!;
       this.assign(client);
     }
   }
@@ -125,8 +125,8 @@ export class _ConnectionPool extends ConnectionPool {
         connection._pool = this;
         return connection;
       },
-      this.options.connectionLimit,
-      this.options.connectionLimit
+      this.options.connectionLimit!,
+      this.options.connectionLimit!
     );
     this.database = options.database;
   }
@@ -221,8 +221,8 @@ export class QueryHistory {
 }
 
 class _Connection extends Connection {
-  _pool: _ConnectionPool;
-  _connected: boolean;
+  _pool?: _ConnectionPool;
+  _connected?: boolean;
 
   dialect: Dialect = 'generic';
   driver: Driver;
@@ -286,10 +286,10 @@ class _Connection extends Connection {
 }
 
 export default {
-  createConnectionPool: (options): ConnectionPool => {
+  createConnectionPool: (options: PoolOptions): ConnectionPool => {
     return new _ConnectionPool(options);
   },
-  createConnection: (options): Connection => {
+  createConnection: (options: { driver: string; database: string }): Connection => {
     return new _Connection(options);
   },
 };

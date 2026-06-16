@@ -223,22 +223,22 @@ describe('Other', () => {
 
 test('setModelName', () => {
   const schema = new Schema(helper.getExampleData());
-  const model = schema.model('post');
+  const model = schema.model('post')!;
   const config: SchemaConfig = { models: [{ table: 'post', name: 'Post' }] };
   setModelName(config, model, 'WebPost');
   {
     const model = config.models.find(entry => entry.table === 'post');
-    expect(model.name).toBe('WebPost');
+    expect(model!.name).toBe('WebPost');
   }
   {
     const model = config.models.find(entry => entry.table === 'user');
-    const field = model.fields.find(entry => entry.column === 'first_post_id');
-    expect(field.name).toBe('firstWebPost');
+    const field = model!.fields!.find(entry => entry.column === 'first_post_id');
+    expect(field!.name).toBe('firstWebPost');
   }
   {
     const model = config.models.find(entry => entry.table === 'comment');
-    const field = model.fields.find(entry => entry.column === 'post_id');
-    expect(field.name).toBe('webPost');
+    const field = model!.fields!.find(entry => entry.column === 'post_id');
+    expect(field!.name).toBe('webPost');
   }
 });
 

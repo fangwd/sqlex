@@ -1,5 +1,9 @@
 import * as helper from './helper';
 import { Schema } from '../src/schema';
+import type { Document, Table } from '../src';
+import type { SqlexTables, CategoryRow } from './schema-types';
+
+type TreeData = (string | TreeData)[];
 
 const NAME = 'tree';
 
@@ -77,7 +81,7 @@ test('update', async() => {
 
   const node1_1 = (await table.select('*', { where: { name: '1.1' } }))[0];
 
-  rows = await table.getDescendants(node1_1);
+  rows = await table.getDescendants(node1_1 as unknown as Document);
   expect(rows.length).toBe(2);
 
   await table.db.end();
@@ -102,7 +106,7 @@ test('delete', async() => {
   rows = await table.getDescendants(root.id);
   expect(rows.length).toBe(5);
 
-  await table.delete(node);
+  await table.delete(node as unknown as Document);
 
   rows = await table.getDescendants(root.id);
   expect(rows.length).toBe(2);
@@ -125,18 +129,23 @@ function getDatabase() {
   return helper.connectToDatabase(NAME, schema);
 }
 
-async function createTree(table, data, parent) {
+async function createTree(
+  table: Table<SqlexTables['category']>,
+  data: TreeData,
+  parent: CategoryRow | null
+) {
   const first = await table.create({
     parent: parent ? { connect: parent } : parent,
-    name: data[0]
+    name: data[0] as string
   });
   for (let i = 1; i < data.length; i++) {
-    if (Array.isArray(data[i])) {
-      await createTree(table, data[i], first);
+    const child = data[i];
+    if (Array.isArray(child)) {
+      await createTree(table, child, first);
     } else {
       await table.create({
         parent: { connect: first },
-        name: data[i]
+        name: child
       });
     }
   }

@@ -5,9 +5,9 @@ import {
   toDocument,
   getUniqueFields
 } from './database';
-import { Record } from './record';
+import { Record, FieldValue } from './record';
 
-import { Connection } from './engine';
+import { Connection, Row } from './engine';
 import { encodeFilter } from './filter';
 import { SimpleField, ForeignKeyField, RelatedField } from './schema';
 import { Document, Value } from './types';
@@ -22,7 +22,7 @@ export class FlushState {
   method: FlushMethod = FlushMethod.INSERT;
   dirty: Set<string> = new Set();
   deleted: boolean = false;
-  merged?: Record = null;
+  merged: Record | null = null;
   selected?: boolean = false;
   clone(): FlushState {
     const state = new FlushState();
@@ -47,7 +47,7 @@ export class FlushState {
 class FlushContext {
   connection: Connection;
   visited: Set<Record> = new Set();
-  promises = [];
+  promises: Promise<unknown>[] = [];
 
   constructor(connection: Connection) {
     this.connection = connection;
@@ -121,7 +121,7 @@ export function flushRecord(
 function _persist(connection: Connection, record: Record): Promise<Record> {
   const method = record.__state.method;
   const model = record.__table.model;
-  const filter = getUniqueFields(model, record.__data);
+  const filter = getUniqueFields(model, record.__data)!;
   if (method === FlushMethod.DELETE) {
     return record.__table.delete(filter).then(() => {
       record.__state.deleted = true;
@@ -163,7 +163,7 @@ function _persist(connection: Connection, record: Record): Promise<Record> {
 
           if (Object.keys(fields).length === 1) {
             const name = Object.keys(fields)[0];
-            if (record.__table.model.field(name).uniqueKey.primary) {
+            if (record.__table.model.field(name)!.uniqueKey!.primary) {
               record.__remove_dirty(name);
               return resolve(record);
             }
@@ -206,7 +206,7 @@ function flushTable(
     return Promise.resolve(0);
   }
 
-  const states = [];
+  const states: { data: { [key: string]: FieldValue }; state: FlushState }[] = [];
 
   for (let i = 0; i < table.recordList.length; i++) {
     const record = table.recordList[i];
@@ -232,12 +232,12 @@ function flushTable(
 function _flushTable(
   connection: Connection,
   table: Table,
-  perfect: number
+  perfect?: number
 ): Promise<number> {
   mergeRecords(table);
-  const filter = [];
-  const nameSet = new Set();
-  const recordSet = new Set();
+  const filter: Record[] = [];
+  const nameSet: Set<string> = new Set();
+  const recordSet: Set<Record> = new Set();
 
   for (const record of table.recordList) {
     if (
@@ -262,7 +262,7 @@ function _flushTable(
   const model = table.model;
 
   if (model.keyField()) {
-    nameSet.add(model.keyField().name);
+    nameSet.add(model.keyField()!.name);
   }
 
   function _select(): Promise<any> {
@@ -274,7 +274,7 @@ function _flushTable(
     const query = `select ${columns.join(',')} from ${from} where ${where}`;
     return connection._query(query).then(rows => {
       const map = makeMapTable(table);
-      rows.forEach(row => map.append(toDocument(row, table.model)));
+      rows.forEach((row: Row) => map.append(toDocument(row, table.model)));
       for (const record of table.recordList) {
         if (!record.__dirty()) continue;
         const existing = map._mapGet(record);
@@ -290,8 +290,8 @@ function _flushTable(
     });
   }
 
-  let insertCount;
-  let updateCount;
+  let insertCount = 0;
+  let updateCount = 0;
 
   function _insert() {
     interface MapEntry {
@@ -402,17 +402,20 @@ function _flushTable(
 function mergeRecords(table: Table) {
   const model = table.model;
 
-  const map = model.uniqueKeys.reduce((map, uc) => {
-    map[uc.name()] = {};
-    return map;
-  }, {});
+  const map = model.uniqueKeys.reduce<{ [key: string]: { [key: string]: Record } }>(
+    (map, uc) => {
+      map[uc.name()] = {};
+      return map;
+    },
+    {}
+  );
 
   for (const record of table.recordList) {
     if (record.__state.merged) continue;
     for (const uc of model.uniqueKeys) {
       const value = record.__valueOf(uc);
       if (value === undefined) continue;
-      const existing = map[uc.name()][value];
+      const existing = map[uc.name()][value as string];
       if (existing) {
         if (existing === record) {
           throw Error(`Duplicate unique constraint: ${uc.name()} (table ${table.name})`);
@@ -423,7 +426,7 @@ function mergeRecords(table: Table) {
           throw Error(`Inconsistent`);
         }
       } else {
-        map[uc.name()][value] = record;
+        map[uc.name()][value as string] = record;
       }
     }
     if (record.__state.merged) {
@@ -511,7 +514,7 @@ export function flushDatabase(
           .then(() =>
             (perfect ? flushDatabaseA(connection, db) : Promise.resolve()).then(
               () =>
-                flushDatabaseB(connection, db, allowPartial).then((complete) => {
+                flushDatabaseB(connection, db, allowPartial ?? false).then((complete) => {
                   const replace = options.replaceRecordsIn
                     ? replaceRecordsIn(connection, db, options.replaceRecordsIn)
                     : Promise.resolve();
@@ -523,7 +526,7 @@ export function flushDatabase(
                 })
             )
           )
-          .catch(error => {
+          .catch((error: unknown) => {
             connection.rollback().then(() => {
               if (perfect && isIntegrityError(error)) {
                 perfect = false;
@@ -531,7 +534,7 @@ export function flushDatabase(
               } else if (isRetryable(error)) {
                 setTimeout(_flush, Math.random() * 1000);
               } else {
-                reject(Error(error));
+                reject(Error(error as string));
               }
             });
           });
@@ -541,19 +544,25 @@ export function flushDatabase(
   });
 }
 
-function isIntegrityError(error) {
-  // postgres: duplicate key value violates unique constraint "order_pkey"
-  return /\bDuplicate\b|UNIQUE constraint|\blocked\b/i.test(error.message || error.error);
+function errorText(error: unknown): string {
+  const { message, error: nested } = (error ?? {}) as { message?: string; error?: string };
+  return message || nested || '';
 }
 
-function isRetryable(error) {
-  return /\b(Deadlock|locked)\b/i.test(error.message);
+function isIntegrityError(error: unknown) {
+  // postgres: duplicate key value violates unique constraint "order_pkey"
+  return /\bDuplicate\b|UNIQUE constraint|\blocked\b/i.test(errorText(error));
+}
+
+function isRetryable(error: unknown) {
+  const { message } = (error ?? {}) as { message?: string };
+  return /\b(Deadlock|locked)\b/i.test(message || '');
 }
 
 export function dumpDirtyRecords(db: Database, all: boolean = false) {
-  const tables = {};
+  const tables: { [key: string]: ReturnType<Record['__dump']>[] } = {};
   for (const table of db.tableList) {
-    const records = [];
+    const records: ReturnType<Record['__dump']>[] = [];
     for (const record of table.recordList) {
       if ((record.__dirty() && !record.__state.merged) || all) {
         records.push(record.__dump());
@@ -578,7 +587,7 @@ export function _insertRecords(
   table: Table,
   names: string[],
   records: Record[]
-): Promise<Record[]> {
+): Promise<number> {
   const escape = table.db.pool.escapeId;
   const model = table.model;
 
@@ -598,7 +607,7 @@ export function _insertRecords(
 
   const into = escape(table.name);
   const query = `insert into ${into} (${columns}) values ${values.join(',')}`;
-  return connection._query(query, table.model.keyField().column.name);
+  return connection._query(query, table.model.keyField()!.column.name);
 }
 
 export async function replaceRecord(
@@ -706,7 +715,7 @@ async function _buildMapTable(
   const query = `select ${columns.join(',')} from ${from} where ${where}`;
   const rows = await connection._query(query);
   const mapTable = makeMapTable(table);
-  rows.forEach(row => mapTable.append(toDocument(row, table.model)));
+  rows.forEach((row: Row) => mapTable.append(toDocument(row, table.model)));
   return mapTable;
 }
 
@@ -755,10 +764,20 @@ async function _deleteRecords(
 
   const filter = {
     [field.name]: values,
-    not: { [table.model.keyField().name + '_in']: ids }
+    not: { [table.model.keyField()!.name + '_in']: ids }
   };
 
-  await table._delete(connection, filter);
+  const selfField = table.model.fields.find(
+    field =>
+      field instanceof ForeignKeyField &&
+      field.referencedField.model === table.model
+  ) as ForeignKeyField | undefined;
+
+  if (selfField) {
+    await table._deleteLeaves(connection, filter, selfField);
+  } else {
+    await table._delete(connection, filter);
+  }
 
   values = table.recordList
     .filter(record => !record.__is_inserted())

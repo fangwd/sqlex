@@ -36,7 +36,8 @@ class DocumentMap {
 
   get(model: Model, data: Value | Document) {
     const value = toValue(model, data);
-    return this.map.get(model).get(value);
+    const map = this.map.get(model);
+    return map ? map.get(value) : undefined;
   }
 }
 
@@ -68,7 +69,7 @@ export class JsonSerialiser {
     });
 
     while (this.tasks.length > 0) {
-      const task = this.tasks.shift();
+      const task = this.tasks.shift()!;
       this.processTask(task);
     }
 
@@ -85,9 +86,9 @@ export class JsonSerialiser {
       if (field instanceof ForeignKeyField) {
         if (!root[field.name]) continue;
         const model = field.referencedField.model;
-        const value = model.keyValue(root[field.name] as Document);
+        const value = model.keyValue(root[field.name] as Document)!;
         if (this.map.has(model, value)) {
-          root[field.name] = { [model.keyField().name]: value };
+          root[field.name] = { [model.keyField()!.name]: value };
         } else {
           if (this.data[model.name]) {
             const row = this.data[model.name].get(value);
@@ -104,15 +105,15 @@ export class JsonSerialiser {
 
         if (!this.data[model.name]) continue;
 
-        const rows = [];
+        const rows: Document[] = [];
 
         this.data[model.name].forEach((doc, value) => {
           if (model.valueOf(doc, field.referencingField) === pk) {
             if (field.throughField) {
               const model2 = field.throughField.referencedField.model;
-              const value2 = model.valueOf(doc, field.throughField);
+              const value2 = model.valueOf(doc, field.throughField)!;
               if (this.map.has(model2, value2)) {
-                rows.push({ [model2.keyField().name]: value2 });
+                rows.push({ [model2.keyField()!.name]: value2 });
               } else {
                 const root = { ...this.data[model2.name].get(value2) };
                 this.tasks.push({ model: model2, root });
@@ -121,7 +122,7 @@ export class JsonSerialiser {
               }
             } else {
               if (this.map.has(model, value)) {
-                rows.push({ [model.keyField().name]: value });
+                rows.push({ [model.keyField()!.name]: value });
               } else {
                 const root = { ...doc };
                 this.tasks.push({ model, root });
@@ -193,7 +194,7 @@ export class XstreamSerialiser {
 
         const model = field.referencedField.model;
         const doc = root[field.name] as Document;
-        const value = model.keyValue(doc);
+        const value = model.keyValue(doc)!;
 
         if (this.map.has(model, value)) {
           const id = this.map.get(model, value);
@@ -226,7 +227,7 @@ export class XstreamSerialiser {
           if (model.valueOf(doc, field.referencingField) === pk) {
             if (field.throughField) {
               const model2 = field.throughField.referencedField.model;
-              const value2 = model.valueOf(doc, field.throughField);
+              const value2 = model.valueOf(doc, field.throughField)!;
               const name = unique ? field.name : lcfirst(model2.name);
               if (this.map.has(model2, value2)) {
                 const id = this.map.get(model2, value2);
@@ -236,7 +237,7 @@ export class XstreamSerialiser {
                 this.lines.push(`<${name} id="${id}">`);
                 this.pushFields(
                   model2,
-                  this.data[model2.name].get(value2),
+                  this.data[model2.name].get(value2)!,
                   types
                 );
                 this.lines.push(`</${name}>`);
@@ -267,5 +268,5 @@ export class XstreamSerialiser {
 }
 
 function toValue(model: Model, data: Document | Value): Value {
-  return isValue(data) ? (data as Value) : model.keyValue(data as Document);
+  return isValue(data) ? (data as Value) : model.keyValue(data as Document)!;
 }

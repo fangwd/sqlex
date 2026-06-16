@@ -8,7 +8,7 @@ import {
 } from './schema';
 import { FlushState, FlushMethod, flushRecord } from './flush';
 import { Row } from './engine';
-import { copyRecord } from './copy';
+import { copyRecord, CopyOptions } from './copy';
 import { Document, Value } from './types';
 
 export type FieldValue = Value | Record;
@@ -40,13 +40,13 @@ export const RecordProxy = {
             const model = field.referencedField.model;
             let removeDirty = false;
             if (typeof value !== 'object') {
-              value = { [model.keyField().name]: value };
+              value = { [model.keyField()!.name]: value };
               removeDirty = true;
             }
             const parent = record.__table.db.table(model).append(value);
             record.__data[name] = parent;
             if (removeDirty) {
-              parent.__remove_dirty(model.keyField().name);
+              parent.__remove_dirty(model.keyField()!.name);
             }
           }
           record.__state.dirty.add(name);
@@ -95,7 +95,7 @@ export class Record {
   __state: FlushState;
   __related: { [key: string]: RecordSet };
   __inserted: boolean;
-  __connect: boolean;
+  __connect!: boolean;
   __path?: string; // for data loading
 
   constructor(table: Table) {
@@ -145,7 +145,7 @@ export class Record {
     return this.__table.delete(filter);
   }
 
-  copy(data: Document, options?) {
+  copy(data: Document, options?: CopyOptions) {
     return copyRecord(this, data, options);
   }
 
@@ -167,7 +167,7 @@ export class Record {
   }
 
   __flushable(perfect?: number): boolean {
-    if (perfect < 0) return true;
+    if (perfect !== undefined && perfect < 0) return true;
 
     if (this.__state.merged) {
       return false;
@@ -204,7 +204,7 @@ export class Record {
   }
 
   __fields(): Row {
-    const fields = {};
+    const fields: Row = {};
     this.__state.dirty.forEach(key => {
       if (!isEmpty(this.__data[key])) {
         fields[key] = this.__getValue(key);
@@ -223,7 +223,7 @@ export class Record {
     }
   }
 
-  __is_inserted() {
+  __is_inserted(): boolean {
     if (this.__state.merged) {
       return this.__state.merged.__is_inserted();
     }
@@ -262,14 +262,14 @@ export class Record {
 
   __filter(): Row {
     const self = this;
-    const data = Object.keys(this.__data).reduce(function (acc, cur, i) {
+    const data = Object.keys(this.__data).reduce(function (acc: Row, cur: string) {
       acc[cur] = self.__getValue(cur);
       return acc;
-    }, {});
-    return getUniqueFields(this.__table.model, data);
+    }, {} as Row);
+    return getUniqueFields(this.__table.model, data)!;
   }
 
-  __valueOf(uc: UniqueKey): string {
+  __valueOf(uc: UniqueKey): string | undefined | null {
     const values = [];
     for (const field of uc.fields) {
       let value = this.__getValue(field.name);
@@ -281,7 +281,7 @@ export class Record {
   }
 
   __merge() {
-    let root = this.__state.merged;
+    let root = this.__state.merged!;
     while (root.__state.merged) {
       root = root.__state.merged;
     }
@@ -314,15 +314,16 @@ export class Record {
     this.__state.selected = true;
   }
 
-  __json() {
-    const result = {};
+  __json(): Document {
+    const result: Document = {};
     for (const field of this.__table.model.fields) {
       const value = this.__getValue(field.name);
-      if (Array.isArray(value)) {
-        result[field.name] = (value as Record[]).map(record => record.__json());
-        for (const item of result[field.name]) {
-          delete item[(field as RelatedField).referencingField.name];
+      if (field instanceof RelatedField && Array.isArray(value)) {
+        const items = (value as Record[]).map(record => record.__json());
+        for (const item of items) {
+          delete item[field.referencingField.name];
         }
+        result[field.name] = items;
       } else if (value !== undefined) {
         result[field.name] = value;
       }
@@ -331,7 +332,11 @@ export class Record {
   }
 
   __dump() {
-    const data = { __state: this.__state.json(), __missing: [], __flushable: this.__flushable() };
+    const data: { __missing?: string[]; [key: string]: unknown } = {
+      __state: this.__state.json(),
+      __missing: [],
+      __flushable: this.__flushable()
+    };
     for (const field of this.__table.model.fields) {
       let name = field.name;
       const value = this.__data[name];
@@ -341,31 +346,30 @@ export class Record {
         } else if (this.__state.dirty.has(name)) {
           name = '*' + name;
         }
-        if (isValue(value)) {
-          data[name] = value;
+        if (value instanceof Record) {
+          data[name] = value.__repr();
         } else {
-          const record = value as Record;
-          data[name] = record.__repr();
+          data[name] = value;
         }
       }
       else {
         if (field instanceof SimpleField) {
           const { autoIncrement, nullable, default: defaultValue } = field.column;
           if (!nullable && !autoIncrement && defaultValue === undefined) {
-            data.__missing.push(field.name);
+            data.__missing!.push(field.name);
           }
         }
       }
     }
-    if (data.__missing.length === 0) {
+    if (data.__missing!.length === 0) {
       delete data.__missing;
     }
     return data;
   }
 
-  __repr() {
+  __repr(): string {
     const model = this.__table.model;
-    const value = this.__data[model.keyField().name];
+    const value = this.__data[model.keyField()!.name];
     if (value === undefined || isValue(value)) {
       return `${model.name}(${value})`;
     } else {
@@ -385,7 +389,7 @@ export class RecordSet {
   }
 
   // user.groups.add(admin)
-  add(record) {
+  add(record: Record) {
     const data = { [this.field.name]: { upsert: { create: record.__data } } };
     const filter = this.record.__filter();
     return this.record.__table.modify(data, filter);
@@ -403,13 +407,13 @@ export class RecordSet {
 }
 
 export function getModel(table: Table, bulk: boolean = false) {
-  const model: any = function (data) {
-    if (bulk) return table.append(data);
-    const record = new Proxy(new Record(table), RecordProxy);
-    Object.assign(record, data);
-    return record;
-  };
-  model.table = table;
-  model.fields = table.model.fields;
-  return model;
+  return Object.assign(
+    function (data: Document) {
+      if (bulk) return table.append(data);
+      const record = new Proxy(new Record(table), RecordProxy);
+      Object.assign(record, data);
+      return record;
+    },
+    { table, fields: table.model.fields }
+  );
 }

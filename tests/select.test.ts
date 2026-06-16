@@ -1,5 +1,6 @@
 import * as helper from './helper';
 import { selectTree } from '../src/select';
+import type { CategoryRow, ProductRow } from './schema-types';
 
 const NAME = 'select';
 
@@ -23,7 +24,9 @@ test('selectTree', async () => {
   }
 
   {
-    const result = await db.table('product').selectTree({ id: 3 });
+    const result = await db.table('product').selectTree({ id: 3 }) as unknown as Array<{
+      categories: Array<CategoryRow & { name: string; products: ProductRow[] }>;
+    }>;
     expect(result[0].categories[0].name.length).toBeGreaterThan(0);
     expect(result[0].categories[0].products.length).toBeGreaterThan(0);
   }
@@ -68,9 +71,9 @@ test('select related fields of foreign key fields', async () => {
   expect(connection.queryCounter.total).toBe(3);
   const row = rows.find((row: any) => row.group.name === 'ADMIN') as any;
   expect(row.group.userGroups.length).toBe(2);
-  const alice = row.group.userGroups.find(r => r.user.firstName === 'Alice');
+  const alice = row.group.userGroups.find((r: { user: { firstName: string | null } }) => r.user.firstName === 'Alice');
   expect(alice).not.toBe(undefined);
-  const bob = row.group.userGroups.find(r => r.user.firstName === 'Bob');
+  const bob = row.group.userGroups.find((r: { user: { firstName: string | null } }) => r.user.firstName === 'Bob');
   expect(bob).not.toBe(undefined);
   connection.release();
   db.end();

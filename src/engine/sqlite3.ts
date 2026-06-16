@@ -4,7 +4,7 @@ import * as sqlite3 from 'sqlite3';
 import logger from '../logger';
 
 interface PoolOptions {
-  connectionLimit: number;
+  connectionLimit?: number;
   database: string;
 }
 
@@ -45,7 +45,7 @@ export class _ConnectionPool extends ConnectionPool {
       const client: Client = { resolve, reject };
       if (this.pool.length > 0) {
         this.dispatch(client);
-      } else if (this.connectionCount < this.options.connectionLimit) {
+      } else if (this.connectionCount < this.options.connectionLimit!) {
         this.createConnection();
         this.dispatch(client);
       } else {
@@ -55,7 +55,7 @@ export class _ConnectionPool extends ConnectionPool {
   }
 
   dispatch(client: Client) {
-    const connection = this.pool.shift();
+    const connection = this.pool.shift()!;
     client.resolve(connection);
     this.claimed.push(connection);
   }
@@ -68,7 +68,7 @@ export class _ConnectionPool extends ConnectionPool {
     this.pool.push(connection);
 
     if (this.queue.length > 0) {
-      const client = this.queue.shift();
+      const client = this.queue.shift()!;
       this.dispatch(client);
     }
   }
@@ -102,13 +102,13 @@ function escapeDate(date: Date) {
 }
 
 class _Connection extends Connection {
-  _pool: _ConnectionPool;
+  _pool?: _ConnectionPool;
 
   dialect: Dialect = 'sqlite3';
   connection: sqlite3.Database;
   queryCounter: QueryCounter = new QueryCounter();
 
-  constructor(options) {
+  constructor(options: PoolOptions) {
     super();
     this.connection = new sqlite3.Database(options.database, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
     this.database = options.database;
@@ -179,10 +179,10 @@ class _Connection extends Connection {
 }
 
 export default {
-  createConnectionPool: (options): ConnectionPool => {
+  createConnectionPool: (options: PoolOptions): ConnectionPool => {
     return new _ConnectionPool(options);
   },
-  createConnection: (options): Connection => {
+  createConnection: (options: PoolOptions): Connection => {
     return new _Connection(options);
   }
 };

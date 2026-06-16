@@ -22,7 +22,7 @@ export type ViewOptions = {
 export class ViewModel {
   db: Database;
   schema: Schema;
-  name: string;
+  name!: string;
   fields: Field[];
   fieldMap: { [key: string]: SimpleField | ComputedField };
   aliasMap: { [key: string]: string }; // prefix -> table_name
@@ -42,7 +42,7 @@ export class ViewModel {
 
   private buildAliasMap() {
     const options = this.options;
-    const aliasMap = {};
+    const aliasMap: { [key: string]: string } = {};
     const { name, alias } = parseTable(options.table);
     aliasMap[alias] = name;
     if (options.joins) {
@@ -87,7 +87,7 @@ export class ViewModel {
         const { name, alias } = parseTable(entry.table);
         let join = (entry.type || 'inner') + ' join ' + id(name) + ' ' + id(alias);
         if (entry.type !== 'cross') {
-          const expr = parse(entry.on!);
+          const expr = parse(entry.on!)!;
           visit(expr, (name) => builder._extendFilter(filter, [name]));
           const options = {
             name: (path: string) => {
@@ -116,7 +116,7 @@ export class ViewModel {
                     const model = field.referencedField.model;
                     const alias = context.getAlias(model, field, names).alias;
                     const lhs = `${id(prevAlias)}.${id(field.column.name)}`;
-                    const rhs = `${id(alias)}.${id(model.keyField().column.name)}`;
+                    const rhs = `${id(alias)}.${id(model.keyField()!.column.name)}`;
                     froms.push(`join ${id(model.table.name)} ${id(alias)} on ${lhs} = ${rhs}`);
                     prevModel = model;
                     prevAlias = alias;

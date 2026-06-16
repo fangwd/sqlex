@@ -742,7 +742,7 @@ function getRewritePrefix(base: LeafModel): BridgeField[] {
     if (field instanceof RelatedField) {
       prefix.push(field.referencingField);
     } else {
-      prefix.push(field.relatedField);
+      prefix.push(field.relatedField!);
     }
   }
 
@@ -760,7 +760,7 @@ function simplifySelector(simplified: BridgeField[], model: Model, selector: str
     const next = getBridgedModel(field);
 
     if (modelMap.has(next)) {
-      const index = modelMap.get(next);
+      const index = modelMap.get(next)!;
       simplified.splice(index + 1);
       for (let i = index + 1; i < simplified.length; i++) {
         modelMap.delete(simplified[i].model);
