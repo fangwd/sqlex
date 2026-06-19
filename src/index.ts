@@ -62,6 +62,8 @@ export {
   NONE,
 } from './filter';
 
+export type { JsonFilterOptions, JsonOperatorSyntax } from './filter';
+
 export { toArray } from './misc';
 export { selectTree } from './select';
 export { Record, RecordProxy } from './record';

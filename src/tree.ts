@@ -150,7 +150,13 @@ export function treeQuery(
     ` where t1.${field}=${table.escapeValue(key, value as Value)}`;
 
   if (filter) {
-    const additional = encodeFilter(filter, table.model, dialect);
+    const additional = encodeFilter(
+      filter,
+      table.model,
+      dialect,
+      table.db.operatorMap,
+      table.db.jsonFilterOptions
+    );
     if (additional) {
       sql += ` and ${additional}`;
     }

@@ -27,6 +27,7 @@ import {
 import { Document, Value } from './types';
 import { DialectEncoder } from './engine';
 import { toArray } from './misc';
+import { isPlainObject } from './utils';
 import { parse, parseFlat } from './parser/index';
 import { ViewModel } from './view';
 
@@ -120,6 +121,28 @@ const DEFAULT_OPERATOR_MAP: OperatorMap = {
   [LIKE]: 'like',
   [ILIKE]: 'ilike',
 };
+
+export const CONTAINS = 'contains';
+export const EQ = 'eq';
+
+export type JsonOperatorSyntax = 'explicit' | 'suffix' | 'both';
+
+export interface JsonFilterOptions {
+  operatorSyntax?: JsonOperatorSyntax;
+  operatorDelimiter?: '_' | '__';
+}
+
+type ResolvedJsonFilterOptions = Required<JsonFilterOptions>;
+
+const DEFAULT_JSON_FILTER_OPTIONS: ResolvedJsonFilterOptions = {
+  operatorSyntax: 'both',
+  operatorDelimiter: '_',
+};
+
+function isJsonField(field: SimpleField): boolean {
+  return /^json/i.test(field.column.type);
+}
+
 export class QueryBuilder {
   model!: Model;
   field?: Field;
@@ -133,6 +156,7 @@ export class QueryBuilder {
 
   having?: HavingContext;
   operatorMap: OperatorMap;
+  jsonOptions!: ResolvedJsonFilterOptions;
 
   getFroms() {
     let builder: QueryBuilder = this;
@@ -144,11 +168,12 @@ export class QueryBuilder {
 
   // (model, dialect), or (parent, field)
   constructor(model: Model | QueryBuilder, dialect: DialectEncoder | Field,
-      operatorMap?: OperatorMap) {
+      operatorMap?: OperatorMap, jsonOptions?: JsonFilterOptions) {
     if (!(model instanceof QueryBuilder)) {
       this.model = model;
       this.dialect = dialect as DialectEncoder;
       this.operatorMap = { ...DEFAULT_OPERATOR_MAP, ...operatorMap };
+      this.jsonOptions = { ...DEFAULT_JSON_FILTER_OPTIONS, ...jsonOptions };
       this.context = new Context();
       if (model instanceof TableModel) {
         this.alias = model.table.name;
@@ -169,6 +194,7 @@ export class QueryBuilder {
       this.field = dialect as Field;
       this.dialect = this.parent.dialect;
       this.operatorMap = this.parent.operatorMap;
+      this.jsonOptions = this.parent.jsonOptions;
       this.context = this.parent.context;
       if (dialect instanceof ForeignKeyField) {
         this.model = dialect.referencedField.model;
@@ -315,7 +341,12 @@ export class QueryBuilder {
             const relatedField = field.referencedField.model.field(name);
             if (relatedField instanceof RelatedField) {
               const referencingField = relatedField.referencingField;
-              const builder = new QueryBuilder(referencingField.model, this.dialect);
+              const builder = new QueryBuilder(
+                referencingField.model,
+                this.dialect,
+                this.operatorMap,
+                this.jsonOptions
+              );
               let where = query[keys[0]] as Filter;
               if (relatedField.throughField && relatedField.name === name) {
                 where = {
@@ -336,7 +367,15 @@ export class QueryBuilder {
           }
         }
       } else if (field instanceof SimpleField) {
-        exprs.push(this.expr(field, operator, value as Value | Value[]));
+        if (isJsonField(field) && isPlainObject(value)) {
+          if (operator) {
+            throw Error(`Operator '${operator}' cannot take an object value: ${name}`);
+          }
+          const expr = this.jsonWhere(field, value as Document, []);
+          if (expr) exprs.push(expr);
+        } else {
+          exprs.push(this.expr(field, operator, value as Value | Value[]));
+        }
       } else if (field instanceof RelatedField) {
         const filter = value === '*' ? {} : (value as Filter);
         exprs.push(this.exists(field, operator, filter));
@@ -393,19 +432,7 @@ export class QueryBuilder {
         : this.encodeField(field.column.name);
     if (Array.isArray(value)) {
       if (!operator || operator === 'in' || operator === 'notIn') {
-        const values = value
-          .filter((value) => value !== null)
-          .map((value) => this.escape(field, value));
-        const not = operator === 'notIn' ? 'not ' : '';
-        const or = operator === 'notIn' ? 'and' : 'or';
-        if (values.length < value.length) {
-          return values.length === 0
-            ? `${lhs} is ${not}null`
-            : `(${lhs} is ${not}null ${or} ${lhs} ${not}in (${values.join(', ')}))`;
-        } else {
-          if (values.length === 0) return 'false';
-          return `${lhs} ${not}in (${values.join(', ')})`;
-        }
+        return this.listExpr(lhs, operator, value, (value) => this.escape(field, value));
       } else {
         throw Error(`Bad value: ${JSON.stringify(value)}`);
       }
@@ -423,6 +450,292 @@ export class QueryBuilder {
     }
 
     return `${lhs} ${operator} ${this.escape(field, value)}`;
+  }
+
+  private listExpr(
+    lhs: string,
+    operator: string | null,
+    values: Value[],
+    escape: (value: Value) => string
+  ): string {
+    const escaped = values.filter((value) => value !== null).map((value) => escape(value));
+    const not = operator === 'notIn' ? 'not ' : '';
+    const or = operator === 'notIn' ? 'and' : 'or';
+    if (escaped.length < values.length) {
+      return escaped.length === 0
+        ? `${lhs} is ${not}null`
+        : `(${lhs} is ${not}null ${or} ${lhs} ${not}in (${escaped.join(', ')}))`;
+    }
+    if (escaped.length === 0) return 'false';
+    return `${lhs} ${not}in (${escaped.join(', ')})`;
+  }
+
+  // Builds a filter expression for a JSON column. `obj` is a plain object whose
+  // keys describe paths into the JSON document; `path` is the path accumulated
+  // from enclosing objects.
+  private jsonWhere(field: SimpleField, obj: Document, path: string[]): string {
+    const exprs: string[] = [];
+    for (const key in obj) {
+      const value = obj[key];
+      if (isPlainObject(value)) {
+        const kind = this.classifyJsonObject(value as Document);
+        if (kind === 'operator') {
+          if (this.jsonOptions.operatorSyntax === 'suffix') {
+            throw Error(`Explicit operators are disabled (operatorSyntax: 'suffix'): ${key}`);
+          }
+          const segs = this.jsonPath(path, key);
+          for (const opKey in value as Document) {
+            const token = opKey.slice(1);
+            if (!this.isJsonOperator(token)) {
+              throw Error(`Unknown JSON operator: ${opKey}`);
+            }
+            exprs.push(this.jsonLeaf(field, segs, token, (value as Document)[opKey] as Value | Value[]));
+          }
+          continue;
+        }
+        if (kind === 'mixed') {
+          throw Error(`Mixed operators and fields in JSON filter: ${key}`);
+        }
+        // path descent
+        const { name, operator } = this.jsonSplitKey(key);
+        if (operator) {
+          throw Error(`Operator '${operator}' cannot take an object value: ${key}`);
+        }
+        const sub = this.jsonWhere(field, value as Document, this.jsonPath(path, name));
+        if (sub) exprs.push(sub);
+        continue;
+      }
+      const { name, operator } = this.jsonSplitKey(key);
+      exprs.push(this.jsonLeaf(field, this.jsonPath(path, name), operator, value as Value | Value[]));
+    }
+    return exprs.length === 0
+      ? ''
+      : exprs.length === 1
+      ? exprs[0]
+      : exprs.map((x) => `(${x})`).join(' and ');
+  }
+
+  // 'operator' = every key is $-prefixed, 'descent' = none are, 'mixed' = both.
+  private classifyJsonObject(obj: Document): 'operator' | 'descent' | 'mixed' {
+    let hasOperator = false;
+    let hasField = false;
+    for (const key in obj) {
+      if (key[0] === '$') hasOperator = true;
+      else hasField = true;
+    }
+    if (hasOperator && hasField) return 'mixed';
+    return hasOperator ? 'operator' : 'descent';
+  }
+
+  // Splits a JSON object key into its literal path text and an operator token.
+  // Unlike splitKey, a suffix is only stripped when it is a known operator, so
+  // snake_case keys such as `first_name` stay literal.
+  private jsonSplitKey(key: string): { name: string; operator: string | null } {
+    if (this.jsonOptions.operatorSyntax === 'explicit') {
+      return { name: key, operator: null };
+    }
+    const delimiter = this.jsonOptions.operatorDelimiter;
+    const index = key.lastIndexOf(delimiter);
+    if (index > 0) {
+      const suffix = key.slice(index + delimiter.length);
+      if (this.isJsonOperator(suffix)) {
+        return { name: key.slice(0, index), operator: suffix };
+      }
+    }
+    return { name: key, operator: null };
+  }
+
+  private isJsonOperator(token: string): boolean {
+    return token in this.operatorMap || token === EQ || token === NULL || token === CONTAINS;
+  }
+
+  private jsonPath(path: string[], name: string): string[] {
+    const segments = name.split('.');
+    for (const segment of segments) {
+      this.validateJsonSegment(segment);
+    }
+    return [...path, ...segments];
+  }
+
+  private validateJsonSegment(segment: string) {
+    if (segment[0] === '$') {
+      throw Error(`Reserved JSON key (starts with $): ${segment}`);
+    }
+    if (
+      !/^[A-Za-z_][0-9A-Za-z_$]*$/.test(segment) &&
+      !/^(0|[1-9][0-9]*)$/.test(segment)
+    ) {
+      throw Error(`Bad JSON path segment: ${segment}`);
+    }
+  }
+
+  private jsonLeaf(
+    field: SimpleField,
+    path: string[],
+    operator: string | null,
+    value: Value | Value[]
+  ): string {
+    if (operator === CONTAINS) {
+      return this.jsonContains(field, path, value as Value);
+    }
+    if (operator === NULL) {
+      return this.jsonNull(field, path, !!value);
+    }
+    if (Array.isArray(value)) {
+      const op = operator || IN;
+      if (op !== IN && op !== NOT_IN) {
+        throw Error(`Operator '${op}' cannot take an array value`);
+      }
+      const col = this.encodeField(field.column.name);
+      const dialect = this.dialect.dialect;
+      const nonNull = value.filter((v) => v !== null);
+      // JSON booleans extract as 1/0 (sqlite), true/false (postgres ::boolean),
+      // or 'true'/'false' text (mysql), so a boolean list needs typed handling.
+      if (nonNull.length > 0 && nonNull.every((v) => typeof v === 'boolean')) {
+        if (dialect === 'postgres') {
+          const lhs = `(${this.jsonExtract(col, path, true)})::boolean`;
+          return this.listExpr(lhs, op, value, (v) => (v ? 'true' : 'false'));
+        }
+        if (dialect === 'sqlite3') {
+          const lhs = this.jsonExtract(col, path, false);
+          return this.listExpr(lhs, op, value, (v) => (v ? '1' : '0'));
+        }
+        const lhs = this.jsonExtract(col, path, true);
+        return this.listExpr(lhs, op, value, (v) => this.dialect.escape(v ? 'true' : 'false'));
+      }
+      // A purely numeric list compares against numeric extraction so SQLite,
+      // whose json_extract is typed, matches. Otherwise compare as text.
+      const numeric = nonNull.length > 0 && nonNull.every((v) => typeof v === 'number');
+      const lhs =
+        numeric && dialect === 'postgres'
+          ? `(${this.jsonExtract(col, path, true)})::numeric`
+          : this.jsonExtract(col, path, !numeric);
+      return this.listExpr(lhs, op, value, (v) => this.escapeJsonScalar(v));
+    }
+    if (isPlainObject(value)) {
+      throw Error(`Unsupported object value in JSON filter: ${path.join('.')}`);
+    }
+
+    const sqlOp = operator && operator !== EQ ? this.operatorMap[operator] || operator : '=';
+
+    if (value === null && (sqlOp === '=' || sqlOp === '<>')) {
+      return this.jsonNull(field, path, sqlOp === '=');
+    }
+
+    if (sqlOp === 'like' || sqlOp === 'ilike') {
+      if (typeof value !== 'string') {
+        throw Error(`Operator '${operator}' expects a string value`);
+      }
+    }
+
+    return this.jsonCompare(field, path, sqlOp, value);
+  }
+
+  private jsonCompare(field: SimpleField, path: string[], sqlOp: string, value: Value): string {
+    const col = this.encodeField(field.column.name);
+    const dialect = this.dialect.dialect;
+    const isLike = sqlOp === 'like' || sqlOp === 'ilike';
+
+    if (typeof value === 'number' && !isLike) {
+      const lhs =
+        dialect === 'postgres'
+          ? `(${this.jsonExtract(col, path, true)})::numeric`
+          : this.jsonExtract(col, path, false);
+      return `${lhs} ${sqlOp} ${value}`;
+    }
+
+    if (typeof value === 'boolean' && !isLike) {
+      if (dialect === 'postgres') {
+        return `(${this.jsonExtract(col, path, true)})::boolean ${sqlOp} ${value ? 'true' : 'false'}`;
+      }
+      if (dialect === 'sqlite3') {
+        return `${this.jsonExtract(col, path, false)} ${sqlOp} ${value ? 1 : 0}`;
+      }
+      return `${this.jsonExtract(col, path, true)} ${sqlOp} ${this.dialect.escape(value ? 'true' : 'false')}`;
+    }
+
+    const lhs = this.jsonExtract(col, path, true);
+    const rhs =
+      value instanceof Date ? this.dialect.escapeDate(value) : this.dialect.escape(String(value));
+    return `${lhs} ${sqlOp} ${rhs}`;
+  }
+
+  // JSON null or absent. When `isNull` is false, present and not JSON null.
+  private jsonNull(field: SimpleField, path: string[], isNull: boolean): string {
+    const col = this.encodeField(field.column.name);
+    if (this.dialect.dialect === 'mysql') {
+      const ex = this.jsonExtract(col, path, false);
+      return isNull
+        ? `(${ex} is null or json_type(${ex}) = 'NULL')`
+        : `(${ex} is not null and json_type(${ex}) <> 'NULL')`;
+    }
+    const ex = this.jsonExtract(col, path, true);
+    return isNull ? `${ex} is null` : `${ex} is not null`;
+  }
+
+  // The JSON value at `path` is an array containing the scalar `value`.
+  private jsonContains(field: SimpleField, path: string[], value: Value): string {
+    if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+      throw Error(`Operator 'contains' expects a scalar value`);
+    }
+    const col = this.encodeField(field.column.name);
+    const dialect = this.dialect.dialect;
+
+    if (dialect === 'postgres') {
+      const target = `(${this.jsonExtract(col, path, false)})::jsonb`;
+      const literal = this.dialect.escape(JSON.stringify(value));
+      return `${target} @> ${literal}::jsonb`;
+    }
+    if (dialect === 'mysql') {
+      const jsonPath = this.dialect.escape(this.buildPathString(path));
+      const candidate = this.dialect.escape(JSON.stringify(value));
+      return `json_contains(${col}, ${candidate}, ${jsonPath})`;
+    }
+    if (dialect === 'sqlite3') {
+      const jsonPath = this.dialect.escape(this.buildPathString(path));
+      const condition =
+        value === null
+          ? 'value is null'
+          : typeof value === 'boolean'
+          ? `value = ${value ? 1 : 0}`
+          : typeof value === 'number'
+          ? `value = ${value}`
+          : `value = ${this.dialect.escape(String(value))}`;
+      return `exists (select 1 from json_each(${col}, ${jsonPath}) where ${condition})`;
+    }
+    throw Error(`JSON filtering is not supported for dialect: ${dialect}`);
+  }
+
+  private jsonExtract(columnSql: string, path: string[], asText: boolean): string {
+    if (path.length === 0) {
+      throw Error('Empty JSON path');
+    }
+    const dialect = this.dialect.dialect;
+    if (dialect === 'postgres') {
+      const array = 'array[' + path.map((segment) => this.dialect.escape(segment)).join(',') + ']';
+      return `${columnSql} ${asText ? '#>>' : '#>'} ${array}`;
+    }
+    if (dialect === 'mysql' || dialect === 'sqlite3') {
+      const jsonPath = this.dialect.escape(this.buildPathString(path));
+      const extract = `json_extract(${columnSql}, ${jsonPath})`;
+      return asText && dialect === 'mysql' ? `json_unquote(${extract})` : extract;
+    }
+    throw Error(`JSON filtering is not supported for dialect: ${dialect}`);
+  }
+
+  private buildPathString(path: string[]): string {
+    let result = '$';
+    for (const segment of path) {
+      result += /^(0|[1-9][0-9]*)$/.test(segment) ? `[${segment}]` : `.${segment}`;
+    }
+    return result;
+  }
+
+  private escapeJsonScalar(value: Value): string {
+    if (value === null) return 'null';
+    if (typeof value === 'number') return String(value);
+    if (value instanceof Date) return this.dialect.escapeDate(value);
+    return this.dialect.escape(String(value));
   }
 
   _extendFilter(filter: Filter, orderBy: OrderBy): Filter {
@@ -831,8 +1144,14 @@ export class QueryBuilder {
   }
 }
 
-export function encodeFilter(args: Filter, model: Model, escape: DialectEncoder): string {
-  const builder = new QueryBuilder(model, escape);
+export function encodeFilter(
+  args: Filter,
+  model: Model,
+  escape: DialectEncoder,
+  operatorMap?: OperatorMap,
+  jsonOptions?: JsonFilterOptions
+): string {
+  const builder = new QueryBuilder(model, escape, operatorMap, jsonOptions);
   return builder.where(args);
 }
 

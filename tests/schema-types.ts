@@ -193,6 +193,7 @@ export interface ProductRow extends Identifiable {
   price: number | null;
   stockQuantity: number | null;
   status: number | null;
+  config: JsonValue | null;
 }
 
 export interface ProductRelations {
@@ -211,6 +212,7 @@ export interface ProductCreate {
   price?: number | null;
   stockQuantity?: number | null;
   status?: number | null;
+  config?: JsonValue | null;
   categories?: RelatedMutation<CategoryFilter, CategoryCreate, CategoryUpdate>;
   orderItems?: RelatedMutation<OrderItemFilter, OrderItemCreate, OrderItemUpdate>;
   storeProducts?: RelatedMutation<StoreProductFilter, StoreProductCreate, StoreProductUpdate>;

@@ -42,7 +42,7 @@ import {
 
 export type Filter = Document | Document[];
 
-import { encodeFilter, FieldMap, OperatorMap, QueryBuilder } from './filter';
+import { encodeFilter, FieldMap, JsonFilterOptions, OperatorMap, QueryBuilder } from './filter';
 import { toArray } from './misc';
 
 import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
@@ -66,11 +66,17 @@ export class Database<TTables = any> {
   name!: string;
   schema!: Schema;
   operatorMap: OperatorMap;
+  jsonFilterOptions?: JsonFilterOptions;
   pool!: ConnectionPool;
   tableMap: { [key: string]: Table<any> } = {};
   tableList: Table<any>[] = [];
 
-  constructor(connection: ConnectionPool | ConnectionInfo, schema?: Schema, operatorMap?: OperatorMap) {
+  constructor(
+    connection: ConnectionPool | ConnectionInfo,
+    schema?: Schema,
+    operatorMap?: OperatorMap,
+    jsonFilterOptions?: JsonFilterOptions
+  ) {
     if (connection instanceof ConnectionPool) {
       this.pool = connection;
       this.name = this.pool.database;
@@ -80,6 +86,7 @@ export class Database<TTables = any> {
     }
     if (schema) this.setSchema(schema);
     this.operatorMap = operatorMap || {};
+    this.jsonFilterOptions = jsonFilterOptions;
   }
 
   getModels(bulk: boolean = false): { [key: string]: any } {
@@ -233,7 +240,7 @@ export class Database<TTables = any> {
       options = { ...options, from: { table: options.from } };
     }
     const view = new ViewModel(this, options.from as ViewOptions);
-    const builder = new QueryBuilder(view, this.pool, this.operatorMap);
+    const builder = new QueryBuilder(view, this.pool, this.operatorMap, this.jsonFilterOptions);
     let query = builder.select(
       typeof options.fields === 'string' ? [options.fields] : options.fields,
       options,
@@ -645,7 +652,13 @@ export class Table<TSpec = any> {
   }
 
   private _where(filter: Filter) {
-    return encodeFilter(filter, this.model, this.db.pool);
+    return encodeFilter(
+      filter,
+      this.model,
+      this.db.pool,
+      this.db.operatorMap,
+      this.db.jsonFilterOptions
+    );
   }
 
   private _pair(name: string | SimpleField, value: Value): string {
@@ -661,7 +674,7 @@ export class Table<TSpec = any> {
     options: SelectOptions = {},
     filterThunk?: (builder: QueryBuilder) => string
   ): Promise<Row[]> {
-    const builder = new QueryBuilder(this.model, this.db.pool, this.db.operatorMap);
+    const builder = new QueryBuilder(this.model, this.db.pool, this.db.operatorMap, this.db.jsonFilterOptions);
 
     if (this.selectOnly) {
       options = { ...options, where: { ...options.where, ...this.selectOnly } };

@@ -5,6 +5,7 @@ import logger from '../logger';
 import { ResultSetHeader, PoolOptions, ConnectionOptions } from 'mysql2';
 
 class _ConnectionPool extends ConnectionPool {
+  dialect: Dialect = 'mysql';
   private pool: mysql.Pool;
 
   constructor(options: PoolOptions) {

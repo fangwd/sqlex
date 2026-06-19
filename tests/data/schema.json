@@ -380,6 +380,11 @@
           "name": "status",
           "type": "int",
           "nullable": true
+        },
+        {
+          "name": "config",
+          "type": "json",
+          "nullable": true
         }
       ],
       "constraints": [

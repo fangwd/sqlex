@@ -270,7 +270,13 @@ function _flushTable(
     const fields = model.fields.filter(field => nameSet.has(field.name));
     const columns = fields.map(field => dialect.escapeId((field as SimpleField).column.name));
     const from = dialect.escapeId(model.table.name);
-    const where = encodeFilter(filter.map(r => r.__filter()), table.model, dialect);
+    const where = encodeFilter(
+      filter.map(r => r.__filter()),
+      table.model,
+      dialect,
+      table.db.operatorMap,
+      table.db.jsonFilterOptions
+    );
     const query = `select ${columns.join(',')} from ${from} where ${where}`;
     return connection._query(query).then(rows => {
       const map = makeMapTable(table);
@@ -711,7 +717,13 @@ async function _buildMapTable(
   const fields = model.fields.filter(field => field.uniqueKey);
   const columns = fields.map(field => (field as SimpleField).column.name);
   const from = dialect.escapeId(model.table.name);
-  const where = encodeFilter(filter, table.model, dialect);
+  const where = encodeFilter(
+    filter,
+    table.model,
+    dialect,
+    table.db.operatorMap,
+    table.db.jsonFilterOptions
+  );
   const query = `select ${columns.join(',')} from ${from} where ${where}`;
   const rows = await connection._query(query);
   const mapTable = makeMapTable(table);

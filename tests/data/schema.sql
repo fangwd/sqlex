@@ -70,7 +70,8 @@ create table product (
   name varchar(200),
   price float,
   stock_quantity float,
-  status int
+  status int,
+  config json
 );
 
 create table product_category (

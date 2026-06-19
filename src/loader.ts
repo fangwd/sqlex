@@ -268,8 +268,20 @@ export function recordConfigToDocument(
 }
 
 export function mapDocument(doc: Document, config: RecordConfig): Document[] {
+  // The dotted selectors declare which nested keys are relations to expand
+  // (e.g. 'products.name' -> 'products'). Any other object value (such as a
+  // json column) must be left intact rather than cartesian-expanded.
+  const containers = new Set<string>();
+  for (const name in config) {
+    const selector = (Array.isArray(config[name]) ? config[name][0] : config[name]) as string;
+    const parts = selector.split('.');
+    for (let i = 1; i < parts.length; i++) {
+      containers.add(parts.slice(0, i).join('.'));
+    }
+  }
+
   const result: Document[] = [];
-  for (const entry of flatten(doc)) {
+  for (const entry of flatten(doc, containers)) {
     const item: Document = {};
     for (const name in config) {
       const path = Array.isArray(config[name]) ? config[name][0] : config[name];
@@ -284,16 +296,27 @@ export function mapDocument(doc: Document, config: RecordConfig): Document[] {
 
 type FlatEntry = { [key: string]: DocumentValue };
 
-function flatten(doc: Document): FlatEntry[] {
+function flatten(doc: Document, containers: Set<string>, prefix = ''): FlatEntry[] {
   let result: FlatEntry[] = [{}];
 
   for (const name in doc) {
     const value = doc[name];
+    const path = prefix ? `${prefix}.${name}` : name;
+    // Only relation keys (declared by the select config) are expanded. Other
+    // object values, e.g. json columns, are kept whole.
+    const expand =
+      containers.has(path) && value && typeof value === 'object' && !(value instanceof Date);
     if (Array.isArray(value)) {
+      if (!expand) {
+        for (const entry of result) {
+          entry[name] = value;
+        }
+        continue;
+      }
       const next: FlatEntry[] = [];
       if (value.length > 0) {
         for (const val of value) {
-          const docs = flatten(val as Document);
+          const docs = flatten(val as Document, containers, path);
           for (const doc of docs) {
             for (const res of result) {
               const ent = { ...res };
@@ -308,8 +331,8 @@ function flatten(doc: Document): FlatEntry[] {
       } else {
         // Keep
       }
-    } else if (value && typeof value === 'object' && !(value instanceof Date)) {
-      const docs = flatten(value as Document);
+    } else if (expand) {
+      const docs = flatten(value as Document, containers, path);
       const next: FlatEntry[] = [];
       for (const doc of docs) {
         for (const res of result) {

@@ -33,6 +33,12 @@ insert into product (id, sku, name, price, status) values
   (6, 'sku006', 'Australian Lamb',   16, 1),
   (7, 'sku007', 'American Beef',     17, 1),
   (8, 'sku008', 'American Lamb',     18, 1);
+
+update product set config = '{"featured":true,"rank":1,"tags":["fruit","sale"],"origin":{"country":"AU","region":"Tasmania"},"discount":0.1,"opt_in":"yes","sub_title":"Fresh"}' where id = 1;
+update product set config = '{"featured":false,"rank":2,"tags":["fruit"],"origin":{"country":"AU"}}' where id = 2;
+update product set config = '{"featured":true,"rank":3,"tags":["fruit","import"],"origin":{"country":"US"},"discount":null}' where id = 3;
+update product set config = '{"featured":false,"rank":5,"tags":["meat","sale"],"origin":{"country":"AU"}}' where id = 5;
+
 insert into product_category(product_id, category_id) values
   (1, 3),
   (2, 4),
