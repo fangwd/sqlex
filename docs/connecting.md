@@ -5,8 +5,9 @@ How sqlex connects to a database and learns its structure.
 ## Connection options
 
 Construct a `Database` with `{ dialect, connection }`. `dialect` picks the driver;
-`connection` is passed straight through to it, so any option that driver supports
-is available.
+when `connection` is a supported database URL, sqlex can infer it. Object
+connection options are passed through to the driver, so any option that driver
+supports is available.
 
 ```js
 import { Database } from 'sqlex';
@@ -29,6 +30,11 @@ const db = new Database({
 const db = new Database({
   dialect: 'postgres',
   connection: { host: '127.0.0.1', port: 5432, user: 'postgres', password: 'secret', database: 'example' },
+});
+
+// PostgreSQL URL
+const db = new Database({
+  connection: 'postgresql://postgres:secret@127.0.0.1:5432/example',
 });
 
 // SQLite (sqlite3)

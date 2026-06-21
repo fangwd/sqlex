@@ -1,4 +1,4 @@
-import { ConnectionInfo, createConnectionPool } from './engine';
+import { ConnectionInfo, createConnectionPool, resolveConnectionInfo } from './engine';
 import { flushDatabase, replaceRecord, FlushOptions } from './flush';
 import { RecordProxy, Record, getModel } from './record';
 import {
@@ -81,8 +81,9 @@ export class Database<TTables = any> {
       this.pool = connection;
       this.name = this.pool.database;
     } else if (connection) {
-      this.pool = createConnectionPool(connection.dialect, connection.connection);
-      this.name = connection.connection.database || connection.connection.name;
+      const settings = resolveConnectionInfo(connection);
+      this.pool = createConnectionPool(settings.dialect, settings.connection);
+      this.name = settings.connection.database || settings.connection.name;
     }
     if (schema) this.setSchema(schema);
     this.operatorMap = operatorMap || {};

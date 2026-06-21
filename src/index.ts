@@ -35,6 +35,7 @@ export {
 export {
   Dialect,
   ConnectionInfo,
+  ConnectionSettings,
   createConnection,
   createConnectionPool,
   Connection,
