@@ -119,7 +119,10 @@ export class _Connection extends Connection {
           case 'SELECT':
             return result.rows;
           case 'INSERT':
-            return pk ? valueOf(result.rows[0][pk]) : undefined;
+            // With a pk (table.insert), return the new id scalar. Otherwise this
+            // is a raw query(); hand back the rows so `INSERT ... RETURNING ...`
+            // is usable (an INSERT with no RETURNING simply yields []).
+            return pk ? valueOf(result.rows[0][pk]) : result.rows;
           default:
             return {
               affectedRowCount: result.rowCount,

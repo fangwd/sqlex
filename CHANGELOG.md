@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [3.6.2]
+
+### Fixed
+
+- **PostgreSQL: `query()` now returns rows for raw `INSERT ... RETURNING`.**
+  Previously a raw `db.query('insert ... returning id')` resolved to `undefined`
+  (rows were discarded unless the insert went through `table.insert()`, which
+  passes the primary key internally). The Postgres engine now returns
+  `result.rows` for a pk-less INSERT, so `const [row] = await db.query('insert
+  ... returning id', ...)` works; an INSERT with no `returning` clause yields an
+  empty array. `table.insert()` is unchanged — it still returns the new id
+  scalar.
+
 ## [3.5.0]
 
 ### Added
