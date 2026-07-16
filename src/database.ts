@@ -99,16 +99,15 @@ export class Database<TTables = any> {
 
   async buildSchema(config?: SchemaConfig): Promise<Schema> {
     if (this.schema) return Promise.resolve(this.schema);
-    return new Promise((resolve) =>
-      this.pool.getConnection().then((connection) =>
-        getInformationSchema(connection, this.name, config?.name).then((schemaInfo) => {
-          const schema = new Schema(schemaInfo, config);
-          this.setSchema(schema);
-          connection.release();
-          resolve(schema);
-        })
-      )
-    );
+    const connection = await this.pool.getConnection();
+    try {
+      const schemaInfo = await getInformationSchema(connection, this.name, config?.name);
+      const schema = new Schema(schemaInfo, config);
+      this.setSchema(schema);
+      return schema;
+    } finally {
+      await connection.release();
+    }
   }
 
   clone(): Database<TTables> {
