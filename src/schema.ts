@@ -182,6 +182,21 @@ export class Model {
     return keyField ? this.valueOf(row, keyField.name) : undefined;
   }
 
+  // Filter object identifying `row` by its full primary key. Used to locate a
+  // freshly inserted row when the primary key is composite (or otherwise not a
+  // single auto-increment column), where there is no scalar insert id to fetch
+  // by. Returns undefined if any key part is missing from `row`.
+  keyFilter(row: types.Document): types.Document | undefined {
+    if (!this.primaryKey) return undefined;
+    const filter: types.Document = {};
+    for (const field of this.primaryKey.fields) {
+      const value = this.valueOf(row, field.name);
+      if (value === undefined) return undefined;
+      filter[field.name] = value;
+    }
+    return filter;
+  }
+
   valueOf(
     row: types.Document,
     name: string | SimpleField

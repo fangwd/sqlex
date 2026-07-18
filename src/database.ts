@@ -763,9 +763,17 @@ export class Table<TSpec = any> {
     const name = keys.map(key => this.escapeName(key)).join(', ');
     const value = keys.map(key => this.escapeValue(key, data[key])).join(', ');
     const sql = `insert into ${this._name()} (${name}) values (${value})`;
+    // Only a single auto-increment/serial primary key yields a scalar insert id
+    // to fetch by. For a composite (or otherwise serial-less) primary key, skip
+    // `returning` and hand back a key filter derived from the inserted row so
+    // callers (e.g. _create) can locate it.
+    const keyField = this.model.keyField();
     return connection
-      ._query(sql, this.model.keyField()!.column.name)
-      .then(insertId => (typeof insertId === 'number' ? insertId : 0));
+      ._query(sql, keyField ? keyField.column.name : undefined)
+      .then(insertId => {
+        if (keyField) return typeof insertId === 'number' ? insertId : 0;
+        return this.model.keyFilter(data) ?? 0;
+      });
   }
 
   _delete(connection: Connection, filter?: Filter): Promise<any> {
