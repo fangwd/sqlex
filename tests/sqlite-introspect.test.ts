@@ -49,6 +49,11 @@ maybe('introspect sqlite schema from PRAGMA', async () => {
   expect(fk).toBeDefined();
   expect(fk.references.columns).toEqual(['id']);
 
+  const cascading = byName.order_item.constraints.find(
+    (c: any) => c.references && c.references.table === 'order'
+  );
+  expect(cascading.onDelete).toBe('CASCADE');
+
   // user_group has a composite unique on (user_id, group_id)
   const ug = byName.user_group;
   const composite = ug.constraints.find(

@@ -5,7 +5,7 @@ import {
   toDocument,
   getUniqueFields
 } from './database';
-import { Record, FieldValue } from './record';
+import { Record, FieldValue, runtimeOf } from './record';
 
 import { Connection, Row } from './engine';
 import { encodeFilter } from './filter';
@@ -38,7 +38,7 @@ export class FlushState {
       method: FlushMethod[this.method],
       dirty: [...this.dirty],
       deleted: this.deleted,
-      merged: this.merged ? this.merged.__repr() : null,
+      merged: this.merged ? runtimeOf(this.merged).repr() : null,
       selected: this.selected
     };
   }
@@ -59,15 +59,15 @@ function collectParentFields(
   context: FlushContext,
   perfect: number
 ) {
-  if (!record.__dirty() || context.visited.has(record)) return;
+  if (!runtimeOf(record).isDirty() || context.visited.has(record)) return;
 
   context.visited.add(record);
 
-  record.__state.dirty.forEach(key => {
-    const value = record.__data[key];
+  runtimeOf(record).state.dirty.forEach(key => {
+    const value = runtimeOf(record).data[key];
     if (value instanceof Record) {
-      if (value.__flushable(perfect)) {
-        // assert value.__state.method === FlushMethod.INSERT
+      if (runtimeOf(value).isFlushable(perfect)) {
+        // assert runtimeOf(value).state.method === FlushMethod.INSERT
         const promise = _persist(context.connection, value);
         context.promises.push(promise);
       } else {
@@ -80,36 +80,32 @@ function collectParentFields(
 export function flushRecord(
   connection: Connection,
   record: Record
-): Promise<any> {
-  return new Promise((resolve, reject) => {
-    function __resolve() {
-      const context = new FlushContext(connection);
+): Promise<Record> {
+  return flush();
+
+  async function flush(): Promise<Record> {
+    while (true) {
+      let context = new FlushContext(connection);
       collectParentFields(record, context, 1);
       if (context.promises.length > 0) {
-        Promise.all(context.promises).then(() => __resolve());
-      } else {
-        if (record.__flushable(0)) {
-          _persist(connection, record).then(() => {
-            if (!record.__dirty()) {
-              resolve(record);
-            } else {
-              __resolve();
-            }
-          });
-        } else {
-          const context = new FlushContext(connection);
-          collectParentFields(record, context, 0);
-          if (context.promises.length > 0) {
-            Promise.all(context.promises).then(() => __resolve());
-          } else {
-            reject(Error('Loops in record fields'));
-          }
-        }
+        await Promise.all(context.promises);
+        continue;
       }
-    }
 
-    __resolve();
-  });
+      if (runtimeOf(record).isFlushable(0)) {
+        await _persist(connection, record);
+        if (!runtimeOf(record).isDirty()) return record;
+        continue;
+      }
+
+      context = new FlushContext(connection);
+      collectParentFields(record, context, 0);
+      if (context.promises.length === 0) {
+        throw Error('Loops in record fields');
+      }
+      await Promise.all(context.promises);
+    }
+  }
 }
 
 /**
@@ -118,83 +114,85 @@ export function flushRecord(
  *
  * @param record Record to be flushed to disk
  */
-function _persist(connection: Connection, record: Record): Promise<Record> {
-  const method = record.__state.method;
-  const model = record.__table.model;
-  const filter = getUniqueFields(model, record.__data)!;
+async function _persist(
+  connection: Connection,
+  record: Record
+): Promise<Record> {
+  const method = runtimeOf(record).state.method;
+  const model = runtimeOf(record).table.model;
+  const filter = getUniqueFields(model, runtimeOf(record).data as Document)!;
   if (method === FlushMethod.DELETE) {
-    return record.__table.delete(filter).then(() => {
-      record.__state.deleted = true;
-      return record;
-    });
+    await runtimeOf(record).table._delete(connection, filter);
+    runtimeOf(record).state.deleted = true;
+    return record;
   }
 
-  const fields = record.__fields();
+  const fields = runtimeOf(record).fields();
 
   if (method === FlushMethod.UPDATE) {
-    return record.__table._update(connection, fields, filter).then(result => {
-      if ((result.affectedRowCount || result.affectedRows) > 0) {
-        record.__remove_dirty(Object.keys(fields));
-        return record;
-      }
-      throw Error(`Row does not exist`);
-    });
+    const result = await runtimeOf(record).table._update(
+      connection,
+      fields,
+      filter
+    );
+    if ((result.affectedRowCount || result.affectedRows) > 0) {
+      runtimeOf(record).removeDirty(Object.keys(fields));
+      return record;
+    }
+    throw Error('Row does not exist');
   }
 
-  return new Promise((resolve, reject) => {
-    async function _insert() {
-      await connection._query('SAVEPOINT sp');
-      record.__table
-        ._insert(connection, fields)
-        .then(async id => {
-          if (record.__primaryKey() === undefined) {
-            record.__setPrimaryKey(id);
-          }
-          record.__remove_dirty(Object.keys(fields));
-          record.__state.method = FlushMethod.UPDATE;
-          record.__inserted = true;
-          await connection._query('RELEASE SAVEPOINT sp');
-          resolve(record);
-        })
-        .catch(async error => {
-          if (!isIntegrityError(error)) return reject(error);
-
-          await connection._query('ROLLBACK TO SAVEPOINT sp');
-
-          if (Object.keys(fields).length === 1) {
-            const name = Object.keys(fields)[0];
-            if (record.__table.model.field(name)!.uniqueKey!.primary) {
-              record.__remove_dirty(name);
-              return resolve(record);
-            }
-          }
-
-          record.__table._get(connection, filter).then(row => {
-            if (row) {
-              if (record.__primaryKey() === undefined) {
-                const value = row[model.primaryKey.fields[0].name];
-                record.__setPrimaryKey(value as Value);
-              }
-              for (const key in row) {
-                if (fields[key] === record.__table.model.valueOf(row, key)) {
-                  record.__remove_dirty(key);
-                  delete fields[key];
-                }
-              }
-              if (Object.keys(fields).length === 0 || !record.__dirty()) {
-                resolve(record);
-              } else {
-                record.__table._update(connection, fields, filter).then(() => {
-                  record.__remove_dirty(Object.keys(fields));
-                  resolve(record);
-                });
-              }
-            }
-          });
-        });
+  await connection._query('SAVEPOINT sp');
+  try {
+    const id = await runtimeOf(record).table._insert(connection, fields);
+    if (runtimeOf(record).primaryKey() === undefined) {
+      runtimeOf(record).setPrimaryKey(id);
     }
-    _insert();
-  });
+    runtimeOf(record).removeDirty(Object.keys(fields));
+    runtimeOf(record).state.method = FlushMethod.UPDATE;
+    runtimeOf(record).inserted = true;
+    await connection._query('RELEASE SAVEPOINT sp');
+    return record;
+  } catch (error) {
+    if (!isIntegrityError(error)) throw error;
+    await connection._query('ROLLBACK TO SAVEPOINT sp');
+
+    if (Object.keys(fields).length === 1) {
+      const name = Object.keys(fields)[0];
+      if (runtimeOf(record).table.model.field(name)!.uniqueKey!.primary) {
+        runtimeOf(record).removeDirty(name);
+        return record;
+      }
+    }
+
+    const row = await runtimeOf(record).table._get(connection, filter);
+    if (!row) {
+      // Not a visible unique-key conflict (e.g. a lock error that matched the
+      // integrity pattern); surface the original error.
+      throw error;
+    }
+    if (runtimeOf(record).primaryKey() === undefined) {
+      const value = row[model.primaryKey.fields[0].name];
+      runtimeOf(record).setPrimaryKey(value as Value);
+    }
+    if (runtimeOf(record).insertOnly) {
+      runtimeOf(record).state.dirty.clear();
+      runtimeOf(record).state.method = FlushMethod.UPDATE;
+      runtimeOf(record).state.selected = true;
+      return record;
+    }
+    for (const key in row) {
+      if (fields[key] === runtimeOf(record).table.model.valueOf(row, key)) {
+        runtimeOf(record).removeDirty(key);
+        delete fields[key];
+      }
+    }
+    if (Object.keys(fields).length > 0 && runtimeOf(record).isDirty()) {
+      await runtimeOf(record).table._update(connection, fields, filter);
+      runtimeOf(record).removeDirty(Object.keys(fields));
+    }
+    return record;
+  }
 }
 
 function flushTable(
@@ -211,18 +209,18 @@ function flushTable(
   for (let i = 0; i < table.recordList.length; i++) {
     const record = table.recordList[i];
     states.push({
-      data: { ...record.__data },
-      state: record.__state.clone()
+      data: { ...runtimeOf(record).data },
+      state: runtimeOf(record).state.clone()
     });
   }
 
   return _flushTable(connection, table, perfect).catch(error => {
     for (let i = 0; i < table.recordList.length; i++) {
       const record = table.recordList[i];
-      if (record.__dirty()) {
+      if (runtimeOf(record).isDirty()) {
         const state = states[i];
-        record.__data = { ...state.data };
-        record.__state = state.state.clone();
+        runtimeOf(record).data = { ...state.data };
+        runtimeOf(record).state = state.state.clone();
       }
     }
     throw error;
@@ -241,17 +239,17 @@ function _flushTable(
 
   for (const record of table.recordList) {
     if (
-      record.__dirty() &&
-      record.__flushable(perfect) &&
-      !record.__state.selected &&
-      (!(record.__connect && record.__state.selected))
+      runtimeOf(record).isDirty() &&
+      runtimeOf(record).isFlushable(perfect) &&
+      !runtimeOf(record).state.selected &&
+      (!(runtimeOf(record).connect && runtimeOf(record).state.selected))
     ) {
-      const entry = record.__filter();
+      const entry = runtimeOf(record).filter();
       if (entry) {
         for (const name in entry) {
           nameSet.add(name);
         }
-        record.__state.dirty.forEach(name => nameSet.add(name));
+        runtimeOf(record).state.dirty.forEach(name => nameSet.add(name));
         filter.push(record);
       }
       recordSet.add(record);
@@ -271,7 +269,7 @@ function _flushTable(
     const columns = fields.map(field => dialect.escapeId((field as SimpleField).column.name));
     const from = dialect.escapeId(model.table.name);
     const where = encodeFilter(
-      filter.map(r => r.__filter()),
+      filter.map(r => runtimeOf(r).filter()),
       table.model,
       dialect,
       table.db.operatorMap,
@@ -282,15 +280,15 @@ function _flushTable(
       const map = makeMapTable(table);
       rows.forEach((row: Row) => map.append(toDocument(row, table.model)));
       for (const record of table.recordList) {
-        if (!record.__dirty()) continue;
+        if (!runtimeOf(record).isDirty()) continue;
         const existing = map._mapGet(record);
         if (existing) {
-          record.__updateState(existing);
+          runtimeOf(record).updateState(existing);
         }
       }
       for (const record of filter) {
-        if (record.__connect) {
-          record.__state.selected = true;
+        if (runtimeOf(record).connect) {
+          runtimeOf(record).state.selected = true;
         }
       }
     });
@@ -312,17 +310,17 @@ function _flushTable(
     const shouldInsert = (record: Record) => {
       return (
         recordSet.has(record) &&
-        record.__dirty() &&
-        record.__flushable(perfect) &&
-        record.__state.method === FlushMethod.INSERT
+        runtimeOf(record).isDirty() &&
+        runtimeOf(record).isFlushable(perfect) &&
+        runtimeOf(record).state.method === FlushMethod.INSERT
       );
     };
 
     const getNames = (record: Record) => {
       const names = [];
 
-      for (const name of record.__state.dirty) {
-        if (record.__getValue(name) !== undefined) {
+      for (const name of runtimeOf(record).state.dirty) {
+        if (runtimeOf(record).value(name) !== undefined) {
           names.push(name);
         }
       }
@@ -363,20 +361,20 @@ function _flushTable(
           for (let j = entry.records.length - 1; j >= 0; j--) {
             const record = entry.records[j];
             if (model.primaryKey.autoIncrement()) {
-              record.__setPrimaryKey(id--);
+              runtimeOf(record).setPrimaryKey(id--);
             }
-            record.__state.selected = true;
-            record.__state.method = FlushMethod.UPDATE;
-            record.__inserted = true;
+            runtimeOf(record).state.selected = true;
+            runtimeOf(record).state.method = FlushMethod.UPDATE;
+            runtimeOf(record).inserted = true;
           }
         } else {
           for (const record of entry.records) {
             if (model.primaryKey.autoIncrement()) {
-              record.__setPrimaryKey(id++);
+              runtimeOf(record).setPrimaryKey(id++);
             }
-            record.__state.selected = true;
-            record.__state.method = FlushMethod.UPDATE;
-            record.__inserted = true;
+            runtimeOf(record).state.selected = true;
+            runtimeOf(record).state.method = FlushMethod.UPDATE;
+            runtimeOf(record).inserted = true;
           }
         }
       }
@@ -386,11 +384,11 @@ function _flushTable(
   function _update() {
     const promises = [];
     for (const record of table.recordList) {
-      if (!record.__dirty() || !record.__flushable(perfect)) continue;
-      if (record.__state.method !== FlushMethod.UPDATE) continue;
-      const fields = record.__fields();
-      record.__remove_dirty(Object.keys(fields));
-      promises.push(table._update(connection, fields, record.__filter()));
+      if (!runtimeOf(record).isDirty() || !runtimeOf(record).isFlushable(perfect)) continue;
+      if (runtimeOf(record).state.method !== FlushMethod.UPDATE) continue;
+      const fields = runtimeOf(record).fields();
+      runtimeOf(record).removeDirty(Object.keys(fields));
+      promises.push(table._update(connection, fields, runtimeOf(record).filter()));
     }
     if ((updateCount = promises.length) > 0) {
       return Promise.all(promises);
@@ -417,26 +415,26 @@ function mergeRecords(table: Table) {
   );
 
   for (const record of table.recordList) {
-    if (record.__state.merged) continue;
+    if (runtimeOf(record).state.merged) continue;
     for (const uc of model.uniqueKeys) {
-      const value = record.__valueOf(uc);
+      const value = runtimeOf(record).uniqueValue(uc);
       if (value === undefined) continue;
       const existing = map[uc.name()][value as string];
       if (existing) {
         if (existing === record) {
           throw Error(`Duplicate unique constraint: ${uc.name()} (table ${table.name})`);
         }
-        if (!record.__state.merged) {
-          record.__state.merged = existing;
-        } else if (record.__state.merged !== existing) {
+        if (!runtimeOf(record).state.merged) {
+          runtimeOf(record).state.merged = existing;
+        } else if (runtimeOf(record).state.merged !== existing) {
           throw Error(`Inconsistent`);
         }
       } else {
         map[uc.name()][value as string] = record;
       }
     }
-    if (record.__state.merged) {
-      record.__merge();
+    if (runtimeOf(record).state.merged) {
+      runtimeOf(record).merge();
     }
   }
 }
@@ -566,12 +564,13 @@ function isRetryable(error: unknown) {
 }
 
 export function dumpDirtyRecords(db: Database, all: boolean = false) {
-  const tables: { [key: string]: ReturnType<Record['__dump']>[] } = {};
+  type Dump = ReturnType<ReturnType<typeof runtimeOf>['dump']>;
+  const tables: { [key: string]: Dump[] } = {};
   for (const table of db.tableList) {
-    const records: ReturnType<Record['__dump']>[] = [];
+    const records: Dump[] = [];
     for (const record of table.recordList) {
-      if ((record.__dirty() && !record.__state.merged) || all) {
-        records.push(record.__dump());
+      if ((runtimeOf(record).isDirty() && !runtimeOf(record).state.merged) || all) {
+        records.push(runtimeOf(record).dump());
       }
     }
     if (records.length > 0) {
@@ -605,8 +604,8 @@ export function _insertRecords(
   for (const record of records) {
     const value = [];
     for (const field of fields) {
-      value.push(table.escapeValue(field, record.__getValue(field.name)));
-      record.__remove_dirty(field.name);
+      value.push(table.escapeValue(field, runtimeOf(record).value(field.name)));
+      runtimeOf(record).removeDirty(field.name);
     }
     values.push(`(${value.join(',')})`);
   }
@@ -641,7 +640,7 @@ export async function replaceRecord(
       const childRecords = [];
 
       const referencingTable = table.db.table(field.referencingField.model);
-      const value = record.__primaryKey();
+      const value = runtimeOf(record).primaryKey();
 
       const mapTable = await _buildMapTable(connection, referencingTable, {
         [field.referencingField.name]: value
@@ -692,7 +691,7 @@ export async function replaceRecord(
 
       for (const record of mapTable.recordList) {
         if (!matchedSet.has(record)) {
-          values.push(record.__primaryKey());
+          values.push(runtimeOf(record).primaryKey());
         }
       }
 
@@ -741,8 +740,8 @@ async function replaceRecordsIn(
   const table = db.table(names[0]);
 
   const values = table.recordList
-    .filter(record => !record.__is_inserted())
-    .map(record => record.__primaryKey());
+    .filter(record => !runtimeOf(record).isInserted())
+    .map(record => runtimeOf(record).primaryKey());
 
   if (values.length === 0) return;
 
@@ -772,7 +771,7 @@ async function _deleteRecords(
   values: Value[],
   nameSet: Set<string>
 ) {
-  const ids = table.recordList.map(record => record.__primaryKey());
+  const ids = table.recordList.map(record => runtimeOf(record).primaryKey());
 
   const filter = {
     [field.name]: values,
@@ -792,8 +791,8 @@ async function _deleteRecords(
   }
 
   values = table.recordList
-    .filter(record => !record.__is_inserted())
-    .map(record => record.__primaryKey());
+    .filter(record => !runtimeOf(record).isInserted())
+    .map(record => runtimeOf(record).primaryKey());
 
   if (values.length === 0) return;
 

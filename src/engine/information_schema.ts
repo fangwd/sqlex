@@ -39,6 +39,8 @@ interface ForeignKeyRow {
   table: string;
   from: string;
   to: string | null;
+  on_update: string;
+  on_delete: string;
 }
 
 interface IndexListRow {
@@ -104,6 +106,12 @@ class SqliteBuilder {
         if (/char|text/i.test(baseType)) {
           const m = /\(\s*(\d+)/.exec(declared);
           if (m) columnInfo.size = Number(m[1]);
+        } else if (/^(decimal|numeric)$/i.test(baseType)) {
+          const dimensions = /\(\s*(\d+)(?:\s*,\s*(\d+))?/.exec(declared);
+          if (dimensions) {
+            columnInfo.precision = Number(dimensions[1]);
+            columnInfo.scale = Number(dimensions[2] || 0);
+          }
         }
         // An INTEGER PRIMARY KEY is SQLite's auto-incrementing rowid alias.
         if (pkCols.length === 1 && c.pk === 1 && /^integer$/i.test(baseType)) {
@@ -160,7 +168,9 @@ class SqliteBuilder {
             columns: group
               .map((g, i) => g.to ?? refPk[i])
               .filter((c): c is string => c != null)
-          }
+          },
+          onUpdate: group[0].on_update,
+          onDelete: group[0].on_delete
         });
       }
 
@@ -187,13 +197,15 @@ class Builder {
       this.getTables(),
       this.getColumns(),
       this.getTableConstraints(),
-      this.getKeyColumnUsage()
+      this.getKeyColumnUsage(),
+      this.getReferentialActions()
     ]).then(result => {
       const [
         tableSet,
         tableColumnsMap,
         tableConstraintMap,
-        tableConstraintColumnsMap
+        tableConstraintColumnsMap,
+        referentialActions
       ] = result;
 
       const schemaInfo: SchemaInfo = {
@@ -228,6 +240,10 @@ class Builder {
                 table: columns[0][1][0],
                 columns: columns.map(entry => entry[1][1])
               };
+              constraint.onUpdate =
+                referentialActions[tableName]?.[constraintName]?.onUpdate;
+              constraint.onDelete =
+                referentialActions[tableName]?.[constraintName]?.onDelete;
               break;
           }
           tableInfo.constraints.push(constraint);
@@ -262,7 +278,8 @@ class Builder {
       this.connection,
       `
         select table_name, column_name, ordinal_position, column_default,
-        is_nullable, data_type, character_maximum_length, extra
+        is_nullable, data_type, character_maximum_length, numeric_precision,
+        numeric_scale, extra
         from information_schema.columns
         where table_schema = ${this.escapedSchemaName}`
     ).then(rows => {
@@ -278,8 +295,15 @@ class Builder {
         if (/char|text/i.exec(columnInfo.type)) {
           columnInfo.size = row.character_maximum_length as number;
         }
+        if (/^(decimal|numeric)$/i.test(columnInfo.type)) {
+          columnInfo.precision = row.numeric_precision as number;
+          columnInfo.scale = row.numeric_scale as number;
+        }
         if (/auto_increment/i.exec(row.extra as string)) {
           columnInfo.autoIncrement = true;
+        }
+        if (row.column_default !== null && row.column_default !== undefined) {
+          columnInfo.default = row.column_default as ColumnInfo['default'];
         }
         ordered[tableName].push([row.ordinal_position as number, columnInfo]);
       }
@@ -351,6 +375,37 @@ class Builder {
             .sort((a, b) => a[0] - b[0])
             .map(r => [r[1], r[2]]);
         }
+      }
+      return map;
+    });
+  }
+
+  getReferentialActions(): Promise<{
+    [table: string]: {
+      [constraint: string]: { onUpdate: string; onDelete: string };
+    };
+  }> {
+    return query(
+      this.connection,
+      `
+        select table_name, constraint_name, update_rule, delete_rule
+        from information_schema.referential_constraints
+        where constraint_schema = ${this.escapedSchemaName}`
+    ).then(rows => {
+      const map: {
+        [table: string]: {
+          [constraint: string]: { onUpdate: string; onDelete: string };
+        };
+      } = {};
+      for (let row of rows) {
+        row = lower(row);
+        const table = row.table_name as string;
+        const constraint = row.constraint_name as string;
+        map[table] = map[table] || {};
+        map[table][constraint] = {
+          onUpdate: row.update_rule as string,
+          onDelete: row.delete_rule as string
+        };
       }
       return map;
     });

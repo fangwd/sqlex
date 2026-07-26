@@ -85,9 +85,8 @@ await db.buildSchema({ name: 'example' });
 
 ### Provide a schema explicitly
 
-If you already have the schema as JSON (for example dumped via the
-[CLI](./cli.md)), build a `Schema` and pass it as the second constructor argument
-— no introspection round trip:
+If you already maintain the schema as JSON, build a `Schema` and pass it as the
+second constructor argument to avoid an introspection round trip:
 
 ```js
 import { Database, Schema } from 'sqlex';

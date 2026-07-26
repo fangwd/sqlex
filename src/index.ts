@@ -27,21 +27,22 @@ export type {
 export {
   Database,
   Table,
-  Filter,
-  SelectOptions,
   toDocument,
 } from './database';
+export type { Filter, SelectOptions } from './database';
 
 export {
-  Dialect,
-  ConnectionInfo,
-  ConnectionSettings,
   createConnection,
   createConnectionPool,
   Connection,
   ConnectionPool,
-  Row,
   getInformationSchema
+} from './engine';
+export type {
+  ConnectionInfo,
+  ConnectionSettings,
+  Dialect,
+  Row,
 } from './engine';
 
 export {
@@ -67,7 +68,65 @@ export type { JsonFilterOptions, JsonOperatorSyntax } from './filter';
 
 export { toArray } from './misc';
 export { selectTree } from './select';
-export { Record, RecordProxy } from './record';
+export { Record, RecordSet } from './record';
+export {
+  bindRecords,
+  defineRecord,
+  field,
+  getSqlDefault,
+  Manager,
+  MultipleRecordsError,
+  QuerySet,
+  schemaFromRecords,
+  sqlDefault,
+} from './orm';
+export {
+  defineMigration,
+  diffMigrationSchemas,
+  invertOperations,
+  makeMigration,
+  migrationChecksum,
+  migrationSchemaFromRecords,
+  MigrationCompiler,
+  MigrationRunner,
+  operation,
+  printMigration,
+} from './migration';
+export type {
+  BaselineOptions,
+  MigrateOptions,
+  Migration,
+  MigrationColumn,
+  MigrationConstraint,
+  MigrationDiff,
+  MigrationIndex,
+  MigrationOperation,
+  MigrationResult,
+  MigrationSchema,
+  MigrationStatus,
+  MigrationTable,
+} from './migration';
+export type {
+  BoundModel,
+  BoundModels,
+  DecimalFieldOptions,
+  EnumFieldOptions,
+  FieldOptions,
+  FieldDefinitions,
+  ForeignKeyDefinition,
+  ForeignKeyOptions,
+  InferRecordCreate,
+  InferRecordFields,
+  InferRecordUpdate,
+  RecordClass,
+  RecordClassMap,
+  RecordDefinition,
+  ReferentialAction,
+  ScalarFieldDefinition,
+  ScalarFieldKind,
+  SqlDefault,
+  StringFieldOptions,
+} from './orm';
 export { printSchema, exportSchemaJava, printSchemaTypeScript, printSchemaTypeMap } from './print';
 export { JsonSerialiser, XstreamSerialiser } from './serialiser';
 export { decodeSurrogateKey, getDefaultSurrogateKeyFields, surrogateKeyToFields } from './loader';

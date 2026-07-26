@@ -1,6 +1,6 @@
 import { Database, Table, Filter } from './database';
 import { Model, ForeignKeyField, SimpleField } from './schema';
-import { Record } from './record';
+import { runtimeOf, type DynamicRecord as Record } from './record';
 import { Document } from './types';
 
 export interface CopyOptions {
@@ -12,7 +12,7 @@ export function copyRecord(
   data: Document,
   options?: CopyOptions
 ): Promise<Record> {
-  const table = record.__table;
+  const table = runtimeOf(record).table;
   const filterMap = buildTableFilters(record, options, true);
   const db = new Database(table.db.pool, table.db.schema);
   return selectRows(filterMap, db).then(() => {
@@ -30,7 +30,7 @@ function buildTableFilters(
   options: CopyOptions | undefined,
   uniqueKeysOnly: boolean
 ): Map<Table, Filter> {
-  const db = record.__table.db;
+  const db = runtimeOf(record).table.db;
   const map = new Map();
 
   const except: Set<Table> = new Set();
@@ -48,7 +48,7 @@ function buildTableFilters(
     }
   }
 
-  map.set(record.__table, [record.__data]);
+  map.set(runtimeOf(record).table, [runtimeOf(record).data]);
 
   const handleField = (table: Table, field: ForeignKeyField) => {
     const referencedTable = db.table(field.referencedField.model);
@@ -151,9 +151,9 @@ function flushAll(db: Database) {
     const key = table.model.keyField();
     if (key && key.column.autoIncrement) {
       for (const record of table.recordList) {
-        if (Object.keys(record.__data).length > 1) {
-          record.__remove_dirty(key.name);
-          delete record.__data[key.name];
+        if (Object.keys(runtimeOf(record).data).length > 1) {
+          runtimeOf(record).removeDirty(key.name);
+          delete runtimeOf(record).data[key.name];
         }
       }
     }
@@ -169,7 +169,7 @@ function append(table: Table, row: Document) {
   const value = model.keyValue(row);
   const record = table.append({ [key.name]: value });
 
-  record.__remove_dirty(key.name);
+  runtimeOf(record).removeDirty(key.name);
 
   for (const field of model.fields) {
     if (field instanceof ForeignKeyField && row[field.name]) {
@@ -179,9 +179,9 @@ function append(table: Table, row: Document) {
       const referencedRecord = referencedTable.append({ [key.name]: value });
       if (record[field.name] !== undefined) {
         // No reassignment
-        delete record.__data[field.name];
+        delete runtimeOf(record).data[field.name];
       }
-      referencedRecord.__remove_dirty(key.name);
+      runtimeOf(referencedRecord).removeDirty(key.name);
       record[field.name] = referencedRecord;
     } else if (field instanceof SimpleField && field !== key) {
       record[field.name] = row[field.name];
@@ -221,12 +221,12 @@ function getFilter(table: Table, path: string, record: Record) {
 
   model = field.referencedField.model;
 
-  if (model === record.__table.model) {
-    result[name] = record.__data;
+  if (model === runtimeOf(record).table.model) {
+    result[name] = runtimeOf(record).data as Document;
     return filter;
   }
 
-  const shortest = getShortestPath(model, record.__table.model);
+  const shortest = getShortestPath(model, runtimeOf(record).table.model);
 
   if (shortest.length === 0) {
     throw Error(`Bad filter: ${path} (not reachable)`);
@@ -238,7 +238,7 @@ function getFilter(table: Table, path: string, record: Record) {
   for (let i = 0; i < shortest.length; i++) {
     name = shortest[i];
     if (i === shortest.length - 1) {
-      result[name] = record.__data;
+      result[name] = runtimeOf(record).data as Document;
     } else {
       result[name] = {};
       result = result[name] as FilterNode;

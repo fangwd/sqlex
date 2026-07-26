@@ -13,266 +13,321 @@ import { Document, Value } from './types';
 
 export type FieldValue = Value | Record;
 
-export const RecordProxy = {
-  set: function (record: Record, name: string, value: any) {
-    if (!/^__/.test(name)) {
-      if (value === undefined) {
-        throw Error(`Assigning undefined to ${name}`);
+const runtimes = new WeakMap<Record, RecordRuntime>();
+
+/** @internal */
+export function runtimeOf(record: Record): RecordRuntime {
+  const runtime = runtimes.get(record);
+  if (!runtime) throw Error('Record is not initialized');
+  return runtime;
+}
+
+function parentKey(value: unknown, field: ForeignKeyField): Value | undefined {
+  if (value instanceof Record) {
+    return runtimeOf(value).value(field.referencedField.name);
+  }
+  if (isValue(value)) return value as Value;
+  return value
+    ? field.referencedField.model.valueOf(value as Document, field.referencedField.name)
+    : undefined;
+}
+
+function sameParent(
+  current: unknown,
+  value: unknown,
+  field: ForeignKeyField
+): boolean {
+  if (current === value) return true;
+  const lhs = parentKey(current, field);
+  const rhs = parentKey(value, field);
+  if (lhs != null && rhs != null) return lhs == rhs;
+  // Without both keys, a conflict can only be established between two
+  // distinct record instances. Data values (null placeholders, scalars,
+  // plain objects) merge last-wins, as resolved by Table.append.
+  return !(current instanceof Record && value instanceof Record);
+}
+
+const RecordProxy: ProxyHandler<Record> = {
+  set(record, name, value) {
+    if (typeof name !== 'string') {
+      return Reflect.set(record, name, value);
+    }
+    if (value === undefined) {
+      throw Error(`Assigning undefined to ${name}`);
+    }
+
+    const runtime = runtimeOf(record);
+    const model = runtime.table.model;
+    const field = model.field(name);
+    if (field instanceof ForeignKeyField) {
+      const current = runtime.data[name];
+      // Unsaved records are write-once graph nodes; persisted records may
+      // point a foreign key at a different parent.
+      if (
+        current !== undefined &&
+        !runtime.state.selected &&
+        !sameParent(current, value, field)
+      ) {
+        const key = `${runtime.table.name}.${name}`;
+        throw Error(
+          `Reassigning ${key}: ${parentKey(current, field)} ` +
+          `(new: ${parentKey(value, field)})`
+        );
       }
-      const model = record.__table.model;
-      const field = model.field(name);
-      if (field instanceof ForeignKeyField) {
-        let lhs: Value;
-        if (record.__data[name] instanceof Record) {
-          const rec = record.__data[name] as Record;
-          lhs = rec.__getValue(field.name);
-        } else {
-          lhs = record.__data[name] as Value;
-        }
-        const rhs: Value = isValue(value) ? value : model.valueOf(value, field);
-        if (lhs !== undefined && lhs != rhs) {
-          const key = `${record.__table.name}.${name}`;
-          throw Error(`Reassigning ${key}: ${lhs} (new: ${rhs})`);
-        } else {
-          if (value instanceof Record || value === null) {
-            record.__data[name] = value;
-          } else {
-            const model = field.referencedField.model;
-            let removeDirty = false;
-            if (typeof value !== 'object') {
-              value = { [model.keyField()!.name]: value };
-              removeDirty = true;
-            }
-            const parent = record.__table.db.table(model).append(value);
-            record.__data[name] = parent;
-            if (removeDirty) {
-              parent.__remove_dirty(model.keyField()!.name);
-            }
-          }
-          record.__state.dirty.add(name);
-        }
-      } else if (field instanceof SimpleField) {
-        // user.email = 'user@example.com'
-        record.__data[name] = _toCamel(value, field);
-        record.__state.dirty.add(name);
-      } else if (field instanceof RelatedField) {
-        // Used by replace and __json() only
-        record.__data[name] = value;
+
+      if (value instanceof Record || value === null) {
+        runtime.data[name] = value;
       } else {
-        throw Error(`Invalid field: ${model.name}.${name}`);
+        const referencedModel = field.referencedField.model;
+        let removeDirty = false;
+        if (typeof value !== 'object') {
+          value = { [referencedModel.keyField()!.name]: value };
+          removeDirty = true;
+        }
+        const parent = runtime.table.db.table(referencedModel).append(value);
+        runtime.data[name] = parent;
+        if (removeDirty) {
+          runtimeOf(parent).removeDirty(referencedModel.keyField()!.name);
+        }
       }
+      runtime.state.dirty.add(name);
+    } else if (field instanceof SimpleField) {
+      runtime.data[name] = _toCamel(value, field);
+      runtime.state.dirty.add(name);
+    } else if (field instanceof RelatedField) {
+      runtime.data[name] = value;
     } else {
-      record[name] = value;
+      throw Error(`Invalid field: ${model.name}.${name}`);
     }
     return true;
   },
 
-  get: function (record: Record, name: string) {
-    if (typeof name === 'string' && !/^__/.test(name)) {
-      if (typeof record[name] !== 'function') {
-        const model = record.__table.model;
-        const field = model.field(name);
-        if (field instanceof SimpleField) {
-          return record.__data[name];
-        } else if (field instanceof RelatedField) {
-          let recordSet = record.__related[name];
-          if (!recordSet) {
-            recordSet = new RecordSet(record, field);
-            record.__related[name] = recordSet;
-          }
-          return recordSet;
-        }
+  get(record, name, receiver) {
+    if (typeof name === 'string') {
+      const member = Reflect.get(record, name, receiver);
+      if (typeof member === 'function') return member;
+
+      const runtime = runtimeOf(record);
+      const field = runtime.table.model.field(name);
+      if (field instanceof SimpleField) {
+        // Class-field initializers land on the target as own properties;
+        // model data always lives in the runtime.
+        return runtime.data[name];
       }
+      if (field instanceof RelatedField) {
+        let recordSet = runtime.related[name];
+        if (!recordSet) {
+          recordSet = new RecordSet(receiver, field);
+          runtime.related[name] = recordSet;
+        }
+        return recordSet;
+      }
+      return member;
     }
-    return record[name];
+    return Reflect.get(record, name, receiver);
   }
 };
 
 export class Record {
-  [key: string]: any;
-  __table: Table;
-  __data: { [key: string]: FieldValue };
-  __state: FlushState;
-  __related: { [key: string]: RecordSet };
-  __inserted: boolean;
-  __connect!: boolean;
-  __path?: string; // for data loading
-
   constructor(table: Table) {
-    this.__table = table;
-    this.__data = {};
-    this.__state = new FlushState();
-    this.__related = {};
-    this.__inserted = false;
-
-    return new Proxy(this, RecordProxy);
+    const runtime = new RecordRuntime(this, table);
+    runtimes.set(this, runtime);
+    const proxy = new Proxy(this, RecordProxy);
+    runtime.record = proxy;
+    runtimes.set(proxy, runtime);
+    return proxy;
   }
 
   get(name: string): FieldValue | undefined {
-    return this.__data[name];
+    return runtimeOf(this).data[name];
   }
 
-  save(): Promise<any> {
-    if (!this.__dirty()) {
-      return Promise.resolve(this);
-    }
-    return this.__table.db.pool.getConnection().then(connection => {
-      return new Promise(resolve => {
-        connection.transaction(() => {
-          flushRecord(connection, this).then(result => {
-            connection.commit().then(() => {
-              connection.release();
-              resolve(result);
-            });
-          });
-        });
-      }).catch(error => {
-        throw error
-      });
-    });
+  async save(): Promise<this> {
+    const runtime = runtimeOf(this);
+    if (!runtime.isDirty()) return this;
+    await using connection = await runtime.table.db.pool.getConnection();
+    return await connection.transaction(() => flushRecord(connection, this));
   }
 
-  update(data: Row = {}): Promise<any> {
-    for (const key in data) {
-      this[key] = data[key];
-    }
-    this.__state.method = FlushMethod.UPDATE;
+  update(data: Row = {}): Promise<this> {
+    Object.assign(this, data);
+    runtimeOf(this).state.method = FlushMethod.UPDATE;
     return this.save();
   }
 
   delete(): Promise<any> {
-    const filter = getUniqueFields(this.__table.model, this.__data);
-    return this.__table.delete(filter);
+    const runtime = runtimeOf(this);
+    const filter = getUniqueFields(runtime.table.model, runtime.data as Document);
+    return runtime.table.delete(filter).then(result => {
+      runtime.state.deleted = true;
+      return result;
+    });
+  }
+
+  async refresh(): Promise<this> {
+    const runtime = runtimeOf(this);
+    const row = await runtime.table.get<Document>(runtime.filter());
+    if (!row) throw Error(`${runtime.repr()} no longer exists`);
+
+    runtime.data = {};
+    for (const field of runtime.table.model.fields) {
+      const value = row[field.name];
+      if (value === undefined) continue;
+      if (
+        field instanceof ForeignKeyField &&
+        value &&
+        typeof value === 'object' &&
+        runtime.hydrate
+      ) {
+        const table = runtime.table.db.table(field.referencedField.model);
+        runtime.data[field.name] = runtime.hydrate(table, value as Document) as Record;
+      } else {
+        runtime.data[field.name] = value as FieldValue;
+      }
+    }
+    runtime.state = new FlushState();
+    runtime.state.method = FlushMethod.UPDATE;
+    runtime.state.selected = true;
+    return this;
   }
 
   copy(data: Document, options?: CopyOptions) {
     return copyRecord(this, data, options);
   }
 
-  __dirty(): boolean {
-    return this.__state.dirty.size > 0;
+  toJSON(): Document {
+    return runtimeOf(this).toJSON();
+  }
+}
+
+// Records keep their data outside the instance, so without this hook
+// console.log prints `{}`.
+Object.defineProperty(Record.prototype, Symbol.for('nodejs.util.inspect.custom'), {
+  value(this: Record) {
+    return this.toJSON();
+  },
+  writable: true,
+  configurable: true,
+});
+
+export type DynamicRecord = Record & { [key: string]: any };
+
+/** @internal */
+export class RecordRuntime {
+  record: Record;
+  data: { [key: string]: FieldValue } = {};
+  state = new FlushState();
+  related: { [key: string]: RecordSet } = {};
+  inserted = false;
+  connect = false;
+  // On unique-key conflict, adopt the existing row instead of updating it.
+  insertOnly = false;
+  path?: string;
+  hydrate?: (table: Table, row: Document) => Record | Document;
+
+  constructor(record: Record, readonly table: Table) {
+    this.record = record;
   }
 
-  __disconnect() {
-    const data = this.__data;
-    for (const key of Object.keys(data)) {
-      const value = data[key];
+  isDirty(): boolean {
+    return this.state.dirty.size > 0;
+  }
+
+  disconnect() {
+    for (const key of Object.keys(this.data)) {
+      const value = this.data[key];
       if (value instanceof Record) {
-        if (value.__connect && value.__state.selected) {
-          delete data[key];
-          this.__status.dirty.delete(key);
+        const runtime = runtimeOf(value);
+        if (runtime.connect && runtime.state.selected) {
+          delete this.data[key];
+          this.state.dirty.delete(key);
         }
       }
     }
   }
 
-  __flushable(perfect?: number): boolean {
+  isFlushable(perfect?: number): boolean {
     if (perfect !== undefined && perfect < 0) return true;
+    if (this.state.merged) return false;
+    if (this.state.selected && this.connect) return false;
 
-    if (this.__state.merged) {
-      return false;
-    }
-
-    if (this.__state.selected && this.__connect) {
-      return false;
-    }
-
-    const data = this.__data;
-
-    if (!this.__table.model.checkUniqueKey(data, isEmpty)) {
+    if (!this.table.model.checkUniqueKey(this.data as Document, isEmpty)) {
       if (
-        this.__table.model.uniqueKeys.length > 1 ||
-        !this.__table.model.primaryKey.autoIncrement()
+        this.table.model.uniqueKeys.length > 1 ||
+        !this.table.model.primaryKey.autoIncrement()
       ) {
         return false;
       }
-    } else if (this.__state.method === FlushMethod.DELETE) {
+    } else if (this.state.method === FlushMethod.DELETE) {
       return true;
     }
 
     let flushable = 0;
-
-    this.__state.dirty.forEach(key => {
-      if (!isEmpty(data[key])) {
-        flushable++;
-      }
+    this.state.dirty.forEach(key => {
+      if (!isEmpty(this.data[key])) flushable++;
     });
-
     if (flushable === 0) return false;
-
-    return perfect ? flushable === this.__state.dirty.size : true;
+    return perfect ? flushable === this.state.dirty.size : true;
   }
 
-  __fields(): Row {
+  fields(): Row {
     const fields: Row = {};
-    this.__state.dirty.forEach(key => {
-      if (!isEmpty(this.__data[key])) {
-        fields[key] = this.__getValue(key);
-      }
+    this.state.dirty.forEach(key => {
+      if (!isEmpty(this.data[key])) fields[key] = this.value(key);
     });
     return fields;
   }
 
-  __remove_dirty(keys: string | string[]) {
-    if (typeof keys === 'string') {
-      this.__state.dirty.delete(keys);
-    } else {
-      for (const key of keys) {
-        this.__state.dirty.delete(key);
-      }
+  removeDirty(keys: string | string[]) {
+    for (const key of typeof keys === 'string' ? [keys] : keys) {
+      this.state.dirty.delete(key);
     }
   }
 
-  __is_inserted(): boolean {
-    if (this.__state.merged) {
-      return this.__state.merged.__is_inserted();
-    }
-    return this.__inserted;
+  isInserted(): boolean {
+    return this.state.merged
+      ? runtimeOf(this.state.merged).isInserted()
+      : this.inserted;
   }
 
-  __getValue(name: string): Value {
-    if (this.__data[name] instanceof Record) {
-      let parent = this.__data[name] as Record;
-      while (parent.__state.merged) {
-        parent = parent.__state.merged;
-      }
-      return parent.__primaryKey();
-    }
-    return this.__data[name] as Value;
-  }
-
-  __primaryKey(): Value {
-    const name = this.__table.model.primaryKey.fields[0].name;
-    const value = this.__data[name];
+  value(name: string): Value {
+    const value = this.data[name];
     if (value instanceof Record) {
-      return value.__primaryKey();
+      let parent = runtimeOf(value);
+      while (parent.state.merged) parent = runtimeOf(parent.state.merged);
+      return parent.primaryKey();
     }
-    return value;
+    return value as Value;
   }
 
-  __primaryKeyDirty(): boolean {
-    const name = this.__table.model.primaryKey.fields[0].name;
-    return this.__state.dirty.has(name);
+  primaryKey(): Value {
+    const name = this.table.model.primaryKey.fields[0].name;
+    const value = this.data[name];
+    return value instanceof Record ? runtimeOf(value).primaryKey() : value;
   }
 
-  __setPrimaryKey(value: Value) {
-    const name = this.__table.model.primaryKey.fields[0].name;
-    this.__data[name] = value;
+  isPrimaryKeyDirty(): boolean {
+    const name = this.table.model.primaryKey.fields[0].name;
+    return this.state.dirty.has(name);
   }
 
-  __filter(): Row {
-    const self = this;
-    const data = Object.keys(this.__data).reduce(function (acc: Row, cur: string) {
-      acc[cur] = self.__getValue(cur);
-      return acc;
+  setPrimaryKey(value: Value) {
+    const name = this.table.model.primaryKey.fields[0].name;
+    this.data[name] = value;
+  }
+
+  filter(): Row {
+    const data = Object.keys(this.data).reduce((result, name) => {
+      result[name] = this.value(name);
+      return result;
     }, {} as Row);
-    return getUniqueFields(this.__table.model, data)!;
+    return getUniqueFields(this.table.model, data)!;
   }
 
-  __valueOf(uc: UniqueKey): string | undefined | null {
+  uniqueValue(key: UniqueKey): string | undefined | null {
     const values = [];
-    for (const field of uc.fields) {
-      let value = this.__getValue(field.name);
+    for (const field of key.fields) {
+      const value = this.value(field.name);
       if (value === undefined) return undefined;
       if (value === null) return null;
       values.push(_toCamel(value, field) + '');
@@ -280,49 +335,38 @@ export class Record {
     return JSON.stringify(values).toLocaleLowerCase();
   }
 
-  __merge() {
-    let root = this.__state.merged!;
-    while (root.__state.merged) {
-      root = root.__state.merged;
-    }
-    const self = this;
-    this.__state.dirty.forEach(name => {
-      root.__data[name] = self.__data[name];
-      root.__state.dirty.add(name);
+  merge() {
+    let root = runtimeOf(this.state.merged!);
+    while (root.state.merged) root = runtimeOf(root.state.merged);
+    this.state.dirty.forEach(name => {
+      root.data[name] = this.data[name];
+      root.state.dirty.add(name);
     });
   }
 
-  __updateState(existing: Record) {
-    if (!this.__primaryKey()) {
-      this.__setPrimaryKey(existing.__primaryKey());
-    }
+  updateState(existing: Record) {
+    const existingRuntime = runtimeOf(existing);
+    if (!this.primaryKey()) this.setPrimaryKey(existingRuntime.primaryKey());
 
-    for (const name in existing.__data) {
-      if (!this.__state.dirty.has(name)) continue;
-      const lhs = this.__getValue(name);
-      const rhs = existing.__getValue(name);
-      // TODO: type wise
-      if (lhs == rhs) {
-        this.__state.dirty.delete(name);
+    for (const name in existingRuntime.data) {
+      if (!this.state.dirty.has(name)) continue;
+      if (this.value(name) == existingRuntime.value(name)) {
+        this.state.dirty.delete(name);
       }
     }
-    if (this.__dirty()) {
-      if (this.__state.method === FlushMethod.INSERT) {
-        this.__state.method = FlushMethod.UPDATE;
-      }
+    if (this.isDirty() && this.state.method === FlushMethod.INSERT) {
+      this.state.method = FlushMethod.UPDATE;
     }
-    this.__state.selected = true;
+    this.state.selected = true;
   }
 
-  __json(): Document {
+  toJSON(): Document {
     const result: Document = {};
-    for (const field of this.__table.model.fields) {
-      const value = this.__getValue(field.name);
+    for (const field of this.table.model.fields) {
+      const value = this.value(field.name);
       if (field instanceof RelatedField && Array.isArray(value)) {
-        const items = (value as Record[]).map(record => record.__json());
-        for (const item of items) {
-          delete item[field.referencingField.name];
-        }
+        const items = (value as Record[]).map(record => runtimeOf(record).toJSON());
+        for (const item of items) delete item[field.referencingField.name];
         result[field.name] = items;
       } else if (value !== undefined) {
         result[field.name] = value;
@@ -331,55 +375,43 @@ export class Record {
     return result;
   }
 
-  __dump() {
+  dump() {
     const data: { __missing?: string[]; [key: string]: unknown } = {
-      __state: this.__state.json(),
+      __state: this.state.json(),
       __missing: [],
-      __flushable: this.__flushable()
+      __flushable: this.isFlushable()
     };
-    for (const field of this.__table.model.fields) {
+    for (const field of this.table.model.fields) {
       let name = field.name;
-      const value = this.__data[name];
+      const value = this.data[name];
       if (value !== undefined) {
-        if (this.__state.merged) {
+        if (this.state.merged) {
           name = '!' + name;
-        } else if (this.__state.dirty.has(name)) {
+        } else if (this.state.dirty.has(name)) {
           name = '*' + name;
         }
-        if (value instanceof Record) {
-          data[name] = value.__repr();
-        } else {
-          data[name] = value;
-        }
-      }
-      else {
-        if (field instanceof SimpleField) {
-          const { autoIncrement, nullable, default: defaultValue } = field.column;
-          if (!nullable && !autoIncrement && defaultValue === undefined) {
-            data.__missing!.push(field.name);
-          }
+        data[name] = value instanceof Record ? runtimeOf(value).repr() : value;
+      } else if (field instanceof SimpleField) {
+        const { autoIncrement, nullable, default: defaultValue } = field.column;
+        if (!nullable && !autoIncrement && defaultValue === undefined) {
+          data.__missing!.push(field.name);
         }
       }
     }
-    if (data.__missing!.length === 0) {
-      delete data.__missing;
-    }
+    if (data.__missing!.length === 0) delete data.__missing;
     return data;
   }
 
-  __repr(): string {
-    const model = this.__table.model;
-    const value = this.__data[model.keyField()!.name];
-    if (value === undefined || isValue(value)) {
-      return `${model.name}(${value})`;
-    } else {
-      const record = value as Record;
-      return `${model.name}(${record.__repr()})`;
-    }
+  repr(): string {
+    const model = this.table.model;
+    const value = this.data[model.keyField()!.name];
+    return value === undefined || isValue(value)
+      ? `${model.name}(${value})`
+      : `${model.name}(${runtimeOf(value as Record).repr()})`;
   }
 }
 
-export class RecordSet {
+export class RecordSet<T extends Record = Record> {
   record: Record;
   field: RelatedField;
 
@@ -388,21 +420,66 @@ export class RecordSet {
     this.field = field;
   }
 
+  async all(): Promise<T[]> {
+    const runtime = runtimeOf(this.record);
+    const loaded = runtime.data[this.field.name];
+    if (Array.isArray(loaded)) {
+      return loaded as T[];
+    }
+    const where = runtime.filter();
+    if (!where) {
+      throw Error(
+        `${runtime.repr()}: cannot load relations before unique fields are set`
+      );
+    }
+    const rows = await runtime.table.select<Document>(
+      { [this.field.name]: '*' },
+      { where, limit: 1 }
+    );
+    const values = (rows[0]?.[this.field.name] || []) as Document[];
+    const table = runtime.table.db.table(this.field.referencingField.model);
+    return values.map(value =>
+      runtime.hydrate
+        ? runtime.hydrate(table, value)
+        : value
+    ) as T[];
+  }
+
   // user.groups.add(admin)
-  add(record: Record) {
-    const data = { [this.field.name]: { upsert: { create: record.__data } } };
-    const filter = this.record.__filter();
-    return this.record.__table.modify(data, filter);
+  add(record: T) {
+    const runtime = runtimeOf(this.record);
+    const data = {
+      [this.field.name]: { upsert: { create: runtimeOf(record).data } }
+    };
+    return runtime.table.modify(data as Document, runtime.filter());
   }
 
   // user.groups.replaceWith([admin, customer])
-  replaceWith() { }
+  set(records: T[]) {
+    const data = {
+      [this.field.name]: {
+        set: records.map(record => runtimeOf(record).data),
+      },
+    };
+    const runtime = runtimeOf(this.record);
+    return runtime.table.modify(data as Document, runtime.filter());
+  }
+
+  replaceWith(records: T[]) {
+    return this.set(records);
+  }
+
+  clear() {
+    return this.set([]);
+  }
 
   // user.groups.remove(admin)
-  remove(record: Record) {
-    const data = { [this.field.name]: { delete: [record.__filter()] } };
-    const filter = this.record.__filter();
-    return this.record.__table.modify(data, filter);
+  remove(record: T) {
+    const runtime = runtimeOf(this.record);
+    const data = {
+      [this.field.name]: { delete: [runtimeOf(record).filter()] }
+    };
+    return runtime.table.modify(data, runtime.filter());
   }
 }
 
@@ -410,7 +487,7 @@ export function getModel(table: Table, bulk: boolean = false) {
   return Object.assign(
     function (data: Document) {
       if (bulk) return table.append(data);
-      const record = new Proxy(new Record(table), RecordProxy);
+      const record = new Record(table) as DynamicRecord;
       Object.assign(record, data);
       return record;
     },

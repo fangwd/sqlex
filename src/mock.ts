@@ -2,7 +2,11 @@ import { Database, Table } from './database';
 import { DataType, getTypeName } from './print';
 import { ForeignKeyField, getReferencingFields, isValue, Model, RelatedField, SimpleField } from './schema';
 import { Document, Value } from './types';
-import { Record } from './record';
+import {
+  Record as BaseRecord,
+  runtimeOf,
+  type DynamicRecord as Record
+} from './record';
 
 export async function mock(table: Table, data: undefined, save?: boolean): Promise<Record>;
 export async function mock(table: Table, data: Document, save?: boolean): Promise<Record>;
@@ -34,8 +38,8 @@ function _mock(table: Table, data?: Document): Record {
 }
 
 function setFields(record: Record, data: Document) {
-  const db = record.__table.db;
-  const model = record.__table.model;
+  const db = runtimeOf(record).table.db;
+  const model = runtimeOf(record).table.model;
 
   for (const field of model.fields) {
     const value = data[field.name];
@@ -48,7 +52,7 @@ function setFields(record: Record, data: Document) {
             const parent = table.append({
               [field.referencedField.name]: raw
             })
-            parent.__connect = true;
+            runtimeOf(parent).connect = true;
             record[field.name] = parent;
             continue;
           }
@@ -65,7 +69,7 @@ function setFields(record: Record, data: Document) {
         }
       } else {
         if (field instanceof ForeignKeyField) {
-          if (value === null || value instanceof Record) {
+          if (value === null || value instanceof BaseRecord) {
             record[field.name] = value;
           } else {
             const table = db.table(field.referencedField);
@@ -199,7 +203,7 @@ export async function cleanup(db: Database) {
     const pk = key.model.primaryKey.name();
     const range: Value[] = [];
     for (const record of table.recordList) {
-      if (!record.__connect) {
+      if (!runtimeOf(record).connect) {
         range.push(record[pk]);
       }
     }
@@ -213,7 +217,7 @@ export async function cleanup(db: Database) {
     const pk = model.primaryKey.name();
     const range: Value[] = [];
     for (const record of table.recordList) {
-      if (!record.__connect) {
+      if (!runtimeOf(record).connect) {
         range.push(record[pk]);
       }
     }

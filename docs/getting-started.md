@@ -1,7 +1,13 @@
-# Getting started
+# Getting started with the Table API
 
-This guide takes you from installation to your first query and your first write.
-For anything deeper, follow the links in [Next steps](#next-steps).
+This guide takes you from installation to your first query and write using
+sqlex's schema-introspected `Table` API.
+
+For a new TypeScript application, start with the
+[ORM and migrations quickstart](./orm-quickstart.md). It uses declarative record
+classes to provide static types and generate migrations. The Table API described
+here is useful when adopting an existing database or when direct table
+operations are preferable.
 
 ## Install
 
@@ -152,6 +158,9 @@ await db.end();
 
 ## Next steps
 
+- [ORM and migrations quickstart](./orm-quickstart.md) - typed models and a complete SQLite setup
+- [ORM records](./orm.md) - record fields, managers, query sets, relations, and persistence
+- [Migrations](./migrations.md) - generation, execution, rollback, and baseline adoption
 - [Connecting & schema](./connecting.md) — connection options, pooling, schema introspection vs. JSON definitions
 - [Querying](./querying.md) — selecting rows and related data, ordering, pagination, counting
 - [Filtering](./filtering.md) — operators, `and`/`or`/`not`, nested and dotted-path filters
@@ -161,6 +170,5 @@ await db.end();
 - [Hierarchical data](./hierarchical-data.md) — closure-table trees, ancestors/descendants, cloning
 - [Import & export](./import-export.md) — bulk `load`, `xselect`, surrogate keys, serialisers
 - [Raw SQL](./raw-sql.md) — parameterised queries with `?` and `:named` placeholders
-- [TypeScript](./typescript.md) — typed tables, the type-map generator, `returning`, JSON columns
+- [TypeScript](./typescript.md) — typed tables, `returning`, JSON columns
 - [Testing utilities](./testing.md) — `mock()` / `cleanup()` fixtures
-- [Command line interface](./cli.md) — schema dump and code/type generation

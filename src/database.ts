@@ -1,6 +1,11 @@
 import { ConnectionInfo, createConnectionPool, resolveConnectionInfo } from './engine';
 import { flushDatabase, replaceRecord, FlushOptions } from './flush';
-import { RecordProxy, Record, getModel } from './record';
+import { Record, getModel, runtimeOf, type DynamicRecord } from './record';
+import {
+  bindRecords,
+  BoundModels,
+  RecordClassMap,
+} from './orm';
 import {
   loadTable,
   RecordConfig,
@@ -97,6 +102,22 @@ export class Database<TTables = any> {
     }, {});
   }
 
+  private bound = false;
+
+  bind<const TClasses extends RecordClassMap>(
+    classes: TClasses
+  ): BoundModels<TClasses> {
+    if (this.bound) {
+      throw Error(
+        'Database instance is already bound; bind all record classes in a ' +
+        'single call, or bind a clone() for a separate set of models'
+      );
+    }
+    const models = bindRecords(this, classes);
+    this.bound = true;
+    return models;
+  }
+
   async buildSchema(config?: SchemaConfig): Promise<Schema> {
     if (this.schema) return Promise.resolve(this.schema);
     const connection = await this.pool.getConnection();
@@ -114,8 +135,15 @@ export class Database<TTables = any> {
     return new Database<TTables>(this.pool, this.schema);
   }
 
+  useSchema(schema: Schema): this {
+    this.setSchema(schema);
+    return this;
+  }
+
   private setSchema(schema: Schema) {
     this.schema = schema;
+    this.tableMap = {};
+    this.tableList = [];
 
     for (const model of schema.models) {
       const table = new Table(this, model);
@@ -178,7 +206,10 @@ export class Database<TTables = any> {
     return this.table(name).model;
   }
 
-  append<Name extends keyof TTables & string>(name: Name, data: TableCreate<TTables[Name]>): Record;
+  append<Name extends keyof TTables & string>(
+    name: Name,
+    data: TableCreate<TTables[Name]>
+  ): DynamicRecord;
   append(name: string, data: { [key: string]: any }): any;
   append(name: string, data: { [key: string]: any }): any {
     return this.table(name).append(data);
@@ -320,8 +351,8 @@ export class Table<TSpec = any> {
   model: Model;
   closureTable?: ClosureTable;
 
-  recordList: Record[] = [];
-  recordMap!: { [key: string]: { [key: string]: Record } };
+  recordList: DynamicRecord[] = [];
+  recordMap!: { [key: string]: { [key: string]: DynamicRecord } };
   noInsert = false;
   selectOnly?: Document;
 
@@ -563,23 +594,11 @@ export class Table<TSpec = any> {
   }
 
   async delete<T extends Document = Document>(filter?: Filter): Promise<T> {
-    if (this.closureTable) return this._call('_delete', filter);
-
-    const connection = await this.db.pool.getConnection();
-    try {
-      return connection.transaction(() =>
-        this._delete(connection, filter).then(result => {
-          connection.release();
-          return result;
-        })
-      );
-    } catch (error) {
-      connection.release();
-      throw error;
-    }
+    await using connection = await this.db.pool.getConnection();
+    return await connection.transaction(() => this._delete(connection, filter));
   }
 
-  replace(data: Document): Promise<Record> {
+  replace(data: Document): Promise<DynamicRecord> {
     return this.db.pool.getConnection().then(connection =>
       connection.transaction(() =>
         replaceRecord(connection, this, data).then(record => {
@@ -1420,20 +1439,20 @@ export class Table<TSpec = any> {
     });
   }
 
-  append(data?: { [key: string]: any } | any[]): Record {
-    const record = new Proxy(new Record(this), RecordProxy);
+  append(data?: { [key: string]: any } | any[]): DynamicRecord {
+    const record = new Record(this) as DynamicRecord;
     Object.assign(record, data);
     const existing = this._mapGet(record);
     if (!existing) {
       this.recordList.push(record);
       this._mapPut(record);
-      record.__connect = this.noInsert;
+      runtimeOf(record).connect = this.noInsert;
       return record;
     }
     for (const name in data) {
       const value = (data as Document)[name];
       if (existing[name] != value) {
-        const field = record.__table.model.field(name);
+        const field = runtimeOf(record).table.model.field(name);
         if (field instanceof ForeignKeyField) {
           const model = field.referencedField.model;
           if (existing[name] !== undefined) {
@@ -1448,9 +1467,9 @@ export class Table<TSpec = any> {
     return existing;
   }
 
-  connect(data?: { [key: string]: any } | any[]): Record {
+  connect(data?: { [key: string]: any } | any[]): DynamicRecord {
     const record = this.append(data);
-    record.__connect = true;
+    runtimeOf(record).connect = true;
     return record;
   }
 
@@ -1462,7 +1481,7 @@ export class Table<TSpec = any> {
   getDirtyCount(): number {
     let dirtyCount = 0;
     for (const record of this.recordList) {
-      if (record.__dirty() && !record.__state.merged) {
+      if (runtimeOf(record).isDirty() && !runtimeOf(record).state.merged) {
         dirtyCount++;
       }
     }
@@ -1470,20 +1489,20 @@ export class Table<TSpec = any> {
   }
 
   json() {
-    return this.recordList.map(record => record.__json());
+    return this.recordList.map(record => runtimeOf(record).toJSON());
   }
 
-  _mapGet(record: Record): Record | undefined {
-    let existing: Record | undefined;
+  _mapGet(record: Record): DynamicRecord | undefined {
+    let existing: DynamicRecord | undefined;
     for (const uc of this.model.uniqueKeys) {
-      const value = record.__valueOf(uc);
+      const value = runtimeOf(record).uniqueValue(uc);
       if (value !== undefined && value !== null) {
         const record = this.recordMap[uc.name()][value];
         if (record) {
           if (existing && existing !== record) {
             console.error("Key:", uc.name(), value)
-            console.error("Record A:", existing.__data);
-            console.error("Record B:", record.__data);
+            console.error("Record A:", runtimeOf(existing).data);
+            console.error("Record B:", runtimeOf(record).data);
             throw Error(`Inconsistent unique constraint values in table ${this.name}`);
           }
           existing = record;
@@ -1495,7 +1514,7 @@ export class Table<TSpec = any> {
 
   _mapPut(record: Record) {
     for (const uc of this.model.uniqueKeys) {
-      const value = record.__valueOf(uc);
+      const value = runtimeOf(record).uniqueValue(uc);
       if (value !== undefined && value !== null) {
         this.recordMap[uc.name()][value] = record;
       }
@@ -1855,11 +1874,11 @@ export function isEmpty(value: Value | Record | any) {
   }
 
   if (value instanceof Record) {
-    while (value.__state.merged) {
-      value = value.__state.merged;
+    while (runtimeOf(value).state.merged) {
+      value = runtimeOf(value).state.merged;
     }
-    if (value.__primaryKeyDirty()) return true;
-    return isEmpty(value.__primaryKey());
+    if (runtimeOf(value).isPrimaryKeyDirty()) return true;
+    return isEmpty(runtimeOf(value).primaryKey());
   }
 
   return false;
@@ -1898,7 +1917,7 @@ export function getUniqueFields(model: Model, row: Document) {
     for (const field of uniqueKey.fields) {
       const value = row[field.name];
       if (value instanceof Record) {
-        fields[field.name] = value.__primaryKey();
+        fields[field.name] = runtimeOf(value).primaryKey();
       } else {
         fields[field.name] = row[field.name] as Value;
       }

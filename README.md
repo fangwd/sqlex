@@ -1,86 +1,162 @@
 # sqlex
 
-*sqlex* helps you retrieve, update, import and export data from a relational
-database with minimal ceremony. Alongside the usual one-to-one, many-to-one and
-many-to-many relations, it has built-in support for hierarchical data (trees) via
-closure tables — including cloning a tree rooted at a given node — and a parameterised
-raw-SQL layer with positional (`?`) and named (`:id`) placeholders.
+sqlex is a typed ORM, migration toolkit, and relation-aware database API for
+PostgreSQL, MySQL, and SQLite. It supports declarative record classes,
+checksum-protected migrations, nested relational reads and writes, bulk
+import/export, and graph-aware persistence without hiding the underlying SQL
+model.
 
-**Supported databases:** MySQL, PostgreSQL, SQLite.
+Use the typed ORM for new applications, or introspect an existing database and
+work directly with the lower-level `Table` API.
 
-## Install
+## Requirements
+
+- Node.js 24.12 or newer
+- One database driver: `pg`, `mysql2`, or `sqlite3`
 
 ```sh
-npm install sqlex
-# plus a driver: mysql2 | pg | sqlite3
+npm install sqlex sqlite3
 ```
 
-## Quick example
+## Typed ORM
 
-```js
+Define records once and use the same metadata for TypeScript inference,
+relations, and migrations:
+
+```ts
+import { Database, defineRecord, field } from 'sqlex';
+
+class User extends defineRecord({
+  table: 'app_user',
+  fields: {
+    id: field.id(),
+    email: field.string({ maxLength: 254, unique: true }),
+    active: field.boolean({ default: true }),
+  },
+}) {}
+
+const db = new Database({
+  dialect: 'sqlite3',
+  connection: { database: 'app.db' },
+});
+const models = db.bind({ User });
+
+const [user, created] = await models.User.getOrCreate({
+  email: 'alice@example.com',
+});
+const activeUsers = await models.User
+  .filter({ active: true })
+  .orderBy('email');
+
+console.log({ user, created, activeUsers });
+await db.end();
+```
+
+The **[ORM and migrations quickstart](./docs/orm-quickstart.md)** covers a
+complete SQLite application, including model definitions, generated
+migrations, relations, and queries.
+
+## Migrations
+
+Migration files contain structured, reversible operations and a schema
+snapshot. Applied migrations are tracked with checksums.
+
+```sh
+npx sqlex migration make initial
+npx sqlex migration sql
+npx sqlex migration up
+npx sqlex migration status
+```
+
+See **[Migrations](./docs/migrations.md)** for configuration, rollback,
+baselining an existing database, manual operations, and dialect limitations.
+
+## Table API
+
+The Table API works from an introspected database and does not require record
+classes:
+
+```ts
 import { Database } from 'sqlex';
 
 const db = new Database({
-  dialect: 'mysql',
-  connection: { user: 'root', password: 'secret', database: 'example' },
+  dialect: 'postgres',
+  connection: process.env.DATABASE_URL!,
 });
 
-await db.buildSchema(); // read tables & relations from the database
+await db.buildSchema();
 
-// create an order linked to an existing user
-const order = await db.table('order').create({
-  user: { connect: { email: 'alice@example.com' } },
-  code: 'order-1',
-});
-
-// read it back with the user and each item's product expanded
 const orders = await db.table('order').select({
   user: '*',
   orderItems: { fields: { product: '*' } },
+}, {
+  where: { status_in: [10, 20] },
 });
 
 await db.end();
 ```
 
-New here? Start with the **[Getting started](./docs/getting-started.md)** guide.
+Start with **[Getting started with the Table API](./docs/getting-started.md)**
+when adopting sqlex around an existing schema or when you want direct,
+relation-aware table operations.
+
+## Which API?
+
+| Use case | Start here |
+| --- | --- |
+| New TypeScript application | [ORM quickstart](./docs/orm-quickstart.md) |
+| Generated and reversible schema changes | [Migrations](./docs/migrations.md) |
+| Existing database with no model declarations | [Table API](./docs/getting-started.md) |
+| Nested relational import/export | [Import and export](./docs/import-export.md) |
+| Trees backed by closure tables | [Hierarchical data](./docs/hierarchical-data.md) |
+| Parameterized SQL with named placeholders | [Raw SQL](./docs/raw-sql.md) |
+
+## Features
+
+- Typed record fields, managers, immutable query sets, and reverse relations
+- PostgreSQL, MySQL, and SQLite migration compilation
+- Explicit nested relation selection and mutation
+- Identity mapping and graph-aware persistence for connected records
+- Schema introspection for existing databases
+- JSON-path filtering and configurable filter operator syntax
+- Closure-table tree traversal and cloning
+- Bulk loading, export, serialization, views, and aggregates
+- Parameterized raw SQL with positional and named placeholders
 
 ## Documentation
 
-**Getting started**
-- [Getting started](./docs/getting-started.md) — install, connect, first query and write
+**Start here**
 
-**Guides**
-- [Connecting & schema](./docs/connecting.md) — connection options, pooling, schema introspection
-- [Querying](./docs/querying.md) — selecting rows and related data, ordering, pagination, counting
-- [Filtering](./docs/filtering.md) — operators, `and`/`or`/`not`, nested and dotted-path filters
-- [Mutations](./docs/mutations.md) — create/update/upsert/modify/delete and nested relation writes
-- [Unit of work](./docs/unit-of-work.md) — `append`/`flush`, cyclic references, `replaceRecordsIn`
+- [ORM and migrations quickstart](./docs/orm-quickstart.md)
+- [Getting started with the Table API](./docs/getting-started.md)
+- [Upgrading to v4](./docs/upgrading-to-4.md)
+
+**ORM and schema**
+
+- [ORM records](./docs/orm.md)
+- [Migrations](./docs/migrations.md)
+- [Connecting and schema](./docs/connecting.md)
+- [TypeScript](./docs/typescript.md)
+
+**Queries and writes**
+
+- [Querying](./docs/querying.md)
+- [Filtering](./docs/filtering.md)
+- [Mutations](./docs/mutations.md)
+- [Unit of work](./docs/unit-of-work.md)
 
 **Advanced**
-- [Views & aggregates](./docs/views-and-aggregates.md) — joins, aggregate functions, `groupBy`/`having`
-- [Hierarchical data](./docs/hierarchical-data.md) — closure-table trees, ancestors/descendants, cloning
-- [Import & export](./docs/import-export.md) — bulk `load`, `xselect`, surrogate keys, serialisers
-- [Raw SQL](./docs/raw-sql.md) — parameterised queries with `?` and `:named` placeholders
 
-**TypeScript & tooling**
-- [TypeScript](./docs/typescript.md) — typed tables, the type-map generator, `returning`, JSON columns
-- [Testing utilities](./docs/testing.md) — `mock()` / `cleanup()` fixtures
-- [Command line interface](./docs/cli.md) — schema dump and code/type generation
+- [Views and aggregates](./docs/views-and-aggregates.md)
+- [Hierarchical data](./docs/hierarchical-data.md)
+- [Import and export](./docs/import-export.md)
+- [Raw SQL](./docs/raw-sql.md)
+- [Testing utilities](./docs/testing.md)
 
-## Development
+## Community
 
-### Testing
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup, tests, and pull
+request guidance. Please report security issues through the process in
+[SECURITY.md](./SECURITY.md).
 
-```sh
-# SQLite
-DB_TYPE=sqlite3 npm test
-
-# PostgreSQL
-DB_TYPE=postgres DB_USER=postgres npm test
-
-# MySQL
-DB_TYPE=mysql DB_USER=root DB_PASS=secret npm test
-
-# generic driver
-DB_TYPE=generic SQLEX_DRIVER=/path/to/sqlex.node npm test
-```
+sqlex is released under the [MIT License](./LICENSE).

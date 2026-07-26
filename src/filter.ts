@@ -1,5 +1,5 @@
 import { Filter, OrderBy, shouldSelectSeparately, getUniqueFields, SelectOptions } from './database';
-import { Record } from './record';
+import { Record, runtimeOf } from './record';
 import {
   FlatNode,
   FunctionCallNode,
@@ -1161,11 +1161,11 @@ export function plainify(value: unknown): unknown {
   } else if (isValue(value)) {
     return value;
   } else if (value instanceof Record) {
-    const model = value.__table.model;
-    if (value.__primaryKey()) {
-      return { [model.keyField()!.name]: value.__primaryKey() };
+    const model = runtimeOf(value).table.model;
+    if (runtimeOf(value).primaryKey()) {
+      return { [model.keyField()!.name]: runtimeOf(value).primaryKey() };
     } else {
-      return getUniqueFields(model, value.__data);
+      return getUniqueFields(model, runtimeOf(value).data as Document);
     }
   } else {
     const result: { [key: string]: unknown } = {};

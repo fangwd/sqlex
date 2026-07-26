@@ -1,6 +1,6 @@
 import { Schema } from '../src/schema';
 import { Database } from '../src/database';
-import { Record } from '../src/record';
+import { Record, runtimeOf, type DynamicRecord } from '../src/record';
 
 import * as helper from './helper';
 import type { UserRow } from './schema-types';
@@ -31,7 +31,7 @@ test('append #2', () => {
   expect(user instanceof Record).toBe(true);
   expect(user.email).toBe('user@example.com');
   expect(user.get('email')).toBe('user@example.com');
-  expect(user.__table).toBe(db.table('user'));
+  expect(runtimeOf(user).table).toBe(db.table('user'));
   expect(db.table('user').recordList.length).toBe(0);
   db.end();
 });
@@ -170,13 +170,13 @@ test('flush #1', async() => {
   }
 
   expect(table.recordList.length).toBe(6);
-  expect(table.recordList[1].__dirty()).toBe(true);
+  expect(runtimeOf(table.recordList[1]).isDirty()).toBe(true);
 
   await db.flush();
   const rows = table.recordList;
-  expect(rows[3].__state.merged).toBe(null);
-  expect(rows[4].__state.merged).toBe(rows[1]);
-  expect(rows[5].__state.merged).toBe(rows[2]);
+  expect(runtimeOf(rows[3]).state.merged).toBe(null);
+  expect(runtimeOf(rows[4]).state.merged).toBe(rows[1]);
+  expect(runtimeOf(rows[5]).state.merged).toBe(rows[2]);
   let rec = await table.get({ id: rows[2].id });
   expect(rec.name).toBe('Child 1');
   await db.end();
@@ -462,7 +462,7 @@ test('replaceRecordsIn (1)', async() => {
   const alice = db.append('user', { email: 'alice' });
   const bob = db.append('user', { email: 'bob' });
 
-  const createOrders = (user: Record) => {
+  const createOrders = (user: DynamicRecord) => {
     for (let i = 1; i <= 3; i++) {
       const order = db
         .table('order')
@@ -515,7 +515,7 @@ test('replaceRecordsIn (2)', async() => {
   let alice = db.append('user', { email: 'alice' });
   let bob = db.append('user', { email: 'bob' });
 
-  const createOrders = (user: Record) => {
+  const createOrders = (user: DynamicRecord) => {
     for (let i = 1; i <= 3; i++) {
       const order = db
         .table('order')
@@ -783,5 +783,42 @@ test('replaceRecordsIn (4)', async() => {
     .select('*', { where: { post: posts[1].id } });
 
   expect(comments.length).toBe(8);
+  await db.end();
+});
+
+test('foreign key merge and write-once guard', () => {
+  const schema = new Schema(helper.getExampleData());
+  const db = new Database(null as any, schema);
+  const table = db.table('order');
+
+  // re-expressed parents merge last-wins via append
+  const first = table.append({
+    code: 'fk-merge',
+    user: { email: 'merge@example.com' },
+  });
+  const second = table.append({ code: 'fk-merge', user: 1 });
+  expect(second).toBe(first);
+  expect(runtimeOf(first).value('user')).toBe(1);
+
+  // a null placeholder can be filled in later (loader pattern)
+  const placeholder = table.append({ code: 'fk-null', user: null });
+  placeholder.user = db.table('user').append({ email: 'filled@example.com' });
+  expect(placeholder.user.email).toBe('filled@example.com');
+
+  // distinct unsaved parent records are a conflict
+  const once = table.append({
+    code: 'fk-once',
+    user: { email: 'a@example.com' },
+  });
+  expect(() => {
+    once.user = db.table('user').append({ email: 'b@example.com' });
+  }).toThrow('Reassigning');
+  db.end();
+});
+
+test('record sets require unique fields', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const rec = db.table('order').append();
+  await expect(rec.orderItems.all()).rejects.toThrow('unique fields');
   await db.end();
 });

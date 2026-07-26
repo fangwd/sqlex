@@ -66,6 +66,10 @@ export abstract class Connection implements DialectEncoder {
   abstract end(): Promise<void>;
   abstract release(): void | Promise<void>;
 
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.release();
+  }
+
   abstract escape(s: string): string;
   abstract escapeId(name: string): string;
   abstract escapeDate(date: Date): string;

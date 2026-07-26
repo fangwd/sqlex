@@ -2,6 +2,88 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.0.0]
+
+### Added
+
+- Typed `Record` definitions, per-database managers, immutable query sets,
+  relation managers, hydration, dirty persistence, and identity mapping.
+- Declarative field metadata shared by the ORM and migration generator.
+- Structured PostgreSQL, MySQL, and SQLite migrations with checksums, status,
+  dry runs, rollback, baseline adoption, advisory locks, and additive schema
+  generation.
+- `sqlex migration make|sql|up|down|status|baseline` commands.
+- `field.id()` shorthand for auto-incrementing integer primary keys.
+- Foreign keys accept plain primary key values in `create`/`build`/`update`.
+- Query sets are awaitable and async-iterable, and support `exists()` and bulk
+  `update()`/`delete()`.
+- `Manager.getOrCreate()`.
+- Typed reverse relations via `RecordSet<T>` declarations.
+- Records print their data in `console.log`/`util.inspect`.
+- Node.js 24.12 and TypeScript 7 build support.
+
+### Fixed
+
+- `Record.save()` now commits or rolls back once and always releases its
+  connection.
+- Query-set `update()`/`delete()` throw when `limit`, `offset`, or `orderBy`
+  is set instead of silently mutating every matching row.
+- The write-once guard for unsaved foreign keys now compares the referenced
+  key values; previously record-to-record reassignment slipped through.
+- `getOrCreate()` no longer overwrites a concurrently created row with its
+  defaults; the losing caller adopts the existing row and reports
+  `created: false`.
+- `field.float` compiles to `double precision` on PostgreSQL (previously the
+  invalid type `double`).
+- `migration up --target` with an unknown id now throws instead of silently
+  applying nothing; `sqlex migration down` rejects non-numeric counts.
+- `up --dry-run` and `down --dry-run` now consult the migration ledger, so
+  the preview matches what a real run would execute.
+- `migration make` and `baseline` use the latest migration that carries a
+  schema snapshot, so a trailing manual migration no longer breaks generation
+  or verification.
+- `baseline` verification no longer false-fails on enum, decimal, and uuid
+  columns whose storage type differs per dialect.
+- The MySQL migration lock now fails loudly on `get_lock` timeout instead of
+  proceeding without a lock.
+- Adding a column with a raw-SQL default on SQLite fails at compile time with
+  guidance to use a table rebuild, instead of failing mid-migration.
+- The foreign-key write-once guard no longer rejects loader null placeholders
+  or `Table.append` merges that re-express a parent by key; it now compares
+  referenced key values and flags distinct unsaved record instances.
+- Reading a declared field on a record subclass with a class-field initializer
+  now returns the model data instead of the initializer value.
+- Relation loads on records without unique field values throw instead of
+  silently returning another row's children.
+- Persistence setup failures and misclassified insert errors (e.g. a lock
+  timeout) during flush now reject instead of hanging the save.
+- Removed duplicate record proxy wrapping and fixed record getters and
+  disconnection dirty-state handling.
+- Migration checksums now cover rollback operations and schema snapshots, and
+  are enforced by real and dry-run rollbacks.
+- Generated migrations warn instead of adding required columns without a
+  default, and reject mutually cyclic new tables with explicit guidance.
+- Dry runs only ignore a genuinely absent migration ledger; other database
+  errors are propagated.
+- Baseline verification now checks nullability, generated columns, defaults,
+  varchar/decimal dimensions, and foreign-key update/delete actions.
+- Migration commands reject duplicate ids, invalid rollback counts, and ledgers
+  whose applied migration files are missing.
+
+### Changed
+
+- Moved all `Record` persistence internals into a hidden `WeakMap` runtime.
+  Record instances now expose only declared fields and public methods, including
+  the conventional `toJSON()`.
+- Removed the legacy schema and maintenance CLI. `sqlex` and `sqlex-migrate`
+  now provide migration commands only.
+- Bound models are managers: `models.User.filter(...)` works directly, with
+  `.objects` kept as an alias and `.record` exposing the record class.
+- Persisted records may reassign foreign keys; unsaved records remain
+  write-once graph nodes.
+- `Database.bind()` throws when called twice on the same instance; enum
+  `default` values are checked against the declared `values`.
+
 ## [3.6.2]
 
 ### Fixed

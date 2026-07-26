@@ -1,18 +1,12 @@
 # TypeScript
 
-sqlex ships full type definitions and can generate a **type map** for your schema
-so that `db.table('...')` returns a fully typed table — inputs and results checked
-against your actual columns and relations.
+sqlex ships full type definitions and can generate a **type map** from a
+`Schema` so that `db.table('...')` returns a fully typed table — inputs and
+results checked against your actual columns and relations.
 
 ## Generating the type map
 
-Point the [CLI](./cli.md) at your database and emit a `.ts` file:
-
-```sh
-node_modules/sqlex/bin/sqlex.js --dialect postgres -u user -p secret --export --typeMap mydb > sqlex-schema.ts
-```
-
-Or generate it programmatically from a `Schema` / schema JSON:
+Generate it programmatically from a `Schema` or schema JSON:
 
 ```ts
 import { printSchemaTypeMap } from 'sqlex';

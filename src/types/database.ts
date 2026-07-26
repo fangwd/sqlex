@@ -175,6 +175,8 @@ export interface Column {
   name: string;
   type: string;
   size?: number;
+  precision?: number;
+  scale?: number;
   nullable?: boolean;
   autoIncrement?: boolean;
   default?: Value;
@@ -187,6 +189,8 @@ export interface Constraint {
   primaryKey?: boolean;
   unique?: boolean;
   references?: ReferencedConstraint;
+  onDelete?: string;
+  onUpdate?: string;
   isVirtual?: boolean;
 }
 

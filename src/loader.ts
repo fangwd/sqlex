@@ -1,5 +1,5 @@
 import { Table } from './database';
-import { Record } from './record';
+import { runtimeOf, type DynamicRecord as Record } from './record';
 import { ForeignKeyField, RelatedField, Field, SimpleField, getLeafModel, Model } from './schema';
 import { Document, DocumentValue, Value } from './types';
 import { deepCopy } from './utils';
@@ -20,7 +20,7 @@ function append(
 
   const { fields, defaults, attrs } = configx;
 
-  row.__path = '';
+  runtimeOf(row).path = '';
 
   for (const key in data) {
     const value = data[key];
@@ -43,13 +43,13 @@ function append(
             _row = row;
           } else {
             _row  = getRecordField(_row, _model.field(names[i])!);
-            _row.__path = path;
+            runtimeOf(_row).path = path;
             rowMap.set(path, _row);
             if (_model.field(names[i]) instanceof RelatedField && _defaults) {
               defaultMap.set(_row, _defaults);
             }
           }
-          _model = _row.__table.model;
+          _model = runtimeOf(_row).table.model;
         }
 
         const field = _model.field(names[names.length - 1]);
@@ -71,7 +71,7 @@ function append(
     } else {
       // "*": "categoryAttributes[name,value]"
       if (!attrs) {
-        throw Error(`Unknown field: ${row.__table.name}.${key}`);
+        throw Error(`Unknown field: ${runtimeOf(row).table.name}.${key}`);
       }
       const { field } = attrs;
       const table = db.table(field.referencingField.model);
@@ -112,7 +112,7 @@ function append(
 }
 
 function getRecordField(row: Record, field: Field): Record {
-  const db = row.__table.db;
+  const db = runtimeOf(row).table.db;
 
   if (field instanceof ForeignKeyField) {
     if (!row[field.name]) {
@@ -141,7 +141,7 @@ function getRecordField(row: Record, field: Field): Record {
 
 function setDefaults(row: Record, defaults: Document) {
   for (const name in defaults) {
-    const field = row.__table.model.field(name);
+    const field = runtimeOf(row).table.model.field(name);
     const value = defaults[name];
 
     if (field instanceof ForeignKeyField) {
@@ -150,12 +150,12 @@ function setDefaults(row: Record, defaults: Document) {
           row[name] = null;
           continue;
         }
-        row[name] = row.__table.db.table(field.referencedField.model).append();
+        row[name] = runtimeOf(row).table.db.table(field.referencedField.model).append();
       }
       if (typeof value === 'object' && !(value instanceof Date)) {
         setDefaults(row[name], value as Document);
       } else {
-        row[name].__setPrimaryKey(value);
+        runtimeOf(row[name]).setPrimaryKey(value);
       }
     } else if (field instanceof SimpleField) {
       if (row[name] === undefined) {

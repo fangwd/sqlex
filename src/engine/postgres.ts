@@ -186,7 +186,16 @@ type ColumnUsage = {
   position: number | null,
 }
 type ColumnUsageMap = { [key: string]: { [key: string]: ColumnUsage[] } };
-type ForeignKeyMap = { [key: string]: { [key: string]: { table: string; constraint: string } } };
+type ForeignKeyMap = {
+  [key: string]: {
+    [key: string]: {
+      table: string;
+      constraint: string;
+      onUpdate: string;
+      onDelete: string;
+    }
+  }
+};
 
 class SchemaBuilder {
   connection: Connection;
@@ -240,9 +249,16 @@ class SchemaBuilder {
             constraint.unique = true;
             break;
           case 'FOREIGN KEY':
-            const { table, constraint: unique } = foreignKeyMap[tableName][constraintName];
+            const {
+              table,
+              constraint: unique,
+              onUpdate,
+              onDelete
+            } = foreignKeyMap[tableName][constraintName];
             const columns = columnUsageMap[table][unique].map(e => e.column);
             constraint.references = { table, columns };
+            constraint.onUpdate = onUpdate;
+            constraint.onDelete = onDelete;
             break;
         }
         tableInfo.constraints.push(constraint);
@@ -276,10 +292,13 @@ class SchemaBuilder {
       is_nullable: string;
       data_type: string;
       character_maximum_length: number | null;
+      numeric_precision: number | null;
+      numeric_scale: number | null;
       udt_name: string;
     }>(this.connection, `
       select table_name, column_name, ordinal_position, column_default,
-      is_nullable, data_type, character_maximum_length, udt_name
+      is_nullable, data_type, character_maximum_length, numeric_precision,
+      numeric_scale, udt_name
       from information_schema.columns
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
     `);
@@ -321,6 +340,12 @@ class SchemaBuilder {
         if (row.column_default && /^nextval\(/i.exec(row.column_default)) {
           columnInfo.autoIncrement = true;
         }
+      }
+      else if (/^(decimal|numeric)$/i.test(columnInfo.type)) {
+        columnInfo.precision = row.numeric_precision ?? undefined;
+        columnInfo.scale = row.numeric_scale ?? undefined;
+      }
+      if (row.column_default !== null) {
         columnInfo.default = row.column_default;
       }
       map[row.table_name].push([row.ordinal_position, columnInfo]);
@@ -392,9 +417,12 @@ class SchemaBuilder {
       constraint_name: string;
       foreign_table_name: string;
       unique_constraint_name: string;
+      update_rule: string;
+      delete_rule: string;
     }>(this.connection, `
       select distinct fk.table_name as table_name, rc.constraint_name,
-          pk.table_name as foreign_table_name, rc.unique_constraint_name
+          pk.table_name as foreign_table_name, rc.unique_constraint_name,
+          rc.update_rule, rc.delete_rule
       from
           information_schema.referential_constraints rc
           join information_schema.table_constraints fk on
@@ -410,6 +438,8 @@ class SchemaBuilder {
       result[row.table_name][row.constraint_name] = {
         table: row.foreign_table_name,
         constraint: row.unique_constraint_name,
+        onUpdate: row.update_rule,
+        onDelete: row.delete_rule,
       };
     }
     return result;
