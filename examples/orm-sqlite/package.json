@@ -1,0 +1,20 @@
+{
+  "name": "sqlex-orm-sqlite-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migration:make": "sqlex migration make",
+    "migration:sql": "sqlex migration sql",
+    "migration:up": "sqlex migration up",
+    "start": "node app.mts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "sqlex": "file:../..",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}
