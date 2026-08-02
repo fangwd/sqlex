@@ -54,9 +54,43 @@ Fields support `nullable`, `primaryKey`, `unique`, `generated`, `default`,
 | `field.time()` | `string` | Time value |
 | `field.datetime()` | `Date` | Timestamp/datetime value |
 | `field.json<T>()` | `T` | Generic JSON value type |
+| `field.vector()` | `number[]` | Requires `dimensions`; dense vector/embedding |
 | `field.uuid()` | `string` | Native or dialect-appropriate UUID storage |
 | `field.enum()` | Literal union | Requires `values`; accepts `typeName` |
 | `field.foreignKey()` | Target record | Accepts a record or primary key when writing |
+
+### Vector and embedding fields
+
+Use `field.vector({ dimensions: N })` for a dense embedding with a fixed
+number of finite numeric entries:
+
+```ts
+class Document extends defineRecord({
+  table: 'document',
+  fields: {
+    id: field.id(),
+    embedding: field.vector({ dimensions: 1536 }),
+  },
+}) {}
+```
+
+The record property and create/update inputs are typed as `number[]`. sqlex
+checks the dimension count and rejects `NaN` and infinite entries before it
+generates SQL. Equality filters use the same array form:
+
+```ts
+await models.Document.filter({ embedding: queryEmbedding }).first();
+```
+
+PostgreSQL uses pgvector's native `vector(N)` type, so enable the `vector`
+extension before applying the generated table migration. MySQL uses the native
+`VECTOR(N)` type and requires MySQL 9.0 or newer. SQLite keeps the same declared
+`vector(N)` type and stores the portable JSON vector literal as text; it does
+not provide PostgreSQL/MySQL vector distance operations.
+
+Vector fields support `column`, `nullable`, and `default`. They cannot be
+primary keys, unique, generated, or configured with the portable `index`
+option. Vector similarity indexes require engine-specific migration SQL.
 
 Common options:
 

@@ -365,7 +365,8 @@ export class RecordRuntime {
     for (const field of this.table.model.fields) {
       const value = this.value(field.name);
       if (field instanceof RelatedField && Array.isArray(value)) {
-        const items = (value as Record[]).map(record => runtimeOf(record).toJSON());
+        const items = (value as unknown as Record[])
+          .map(record => runtimeOf(record).toJSON());
         for (const item of items) delete item[field.referencingField.name];
         result[field.name] = items;
       } else if (value !== undefined) {
@@ -424,7 +425,7 @@ export class RecordSet<T extends Record = Record> {
     const runtime = runtimeOf(this.record);
     const loaded = runtime.data[this.field.name];
     if (Array.isArray(loaded)) {
-      return loaded as T[];
+      return loaded as unknown as T[];
     }
     const where = runtime.filter();
     if (!where) {

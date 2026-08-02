@@ -10,9 +10,11 @@ export interface Table {
 }
 
 export type ScalarValue = string | number | boolean | Date | null;
+/** A dense, ordered vector such as an embedding. */
+export type VectorValue = number[];
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-export type Value = ScalarValue;
+export type Value = ScalarValue | VectorValue;
 
 export type DocumentValue = Value | JsonValue | Value[] | JsonValue[] | Document | Document[];
 
@@ -174,6 +176,8 @@ export interface UserDefinedType {
 export interface Column {
   name: string;
   type: string;
+  /** Number of entries required for a vector column. */
+  dimensions?: number;
   size?: number;
   precision?: number;
   scale?: number;

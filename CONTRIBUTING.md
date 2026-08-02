@@ -30,6 +30,14 @@ DB_TYPE=postgres DB_HOST=127.0.0.1 DB_USER=postgres DB_PASS=secret npm test
 DB_TYPE=mysql DB_HOST=127.0.0.1 DB_USER=root DB_PASS=secret npm test
 ```
 
+Native vector integration tests are opt-in for server-backed runs because they
+require MySQL 9+ or an installed PostgreSQL pgvector extension:
+
+```sh
+SQLEX_VECTOR_TESTS=1 DB_TYPE=postgres DB_HOST=127.0.0.1 DB_USER=postgres DB_PASS=secret npm test
+SQLEX_VECTOR_TESTS=1 DB_TYPE=mysql DB_HOST=127.0.0.1 DB_USER=root DB_PASS=secret npm test
+```
+
 The test helper creates and drops databases whose names begin with
 `sqlex_test_`. Use a disposable local database server.
 

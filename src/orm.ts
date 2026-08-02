@@ -6,11 +6,13 @@ import type {
   FilterShape,
   SelectFields,
   Value,
+  VectorValue,
 } from './types';
 import type { Database, OrderBy, SelectOptions, Table } from './database';
 import { ForeignKeyField, RelatedField, Schema, SimpleField } from './schema';
 import { FlushMethod, FlushState } from './flush';
 import { Record as BaseRecord, runtimeOf } from './record';
+import { validateVector } from './vector';
 
 export interface SqlDefault {
   readonly sql: string;
@@ -37,6 +39,20 @@ export interface StringFieldOptions extends FieldOptions {
 export interface DecimalFieldOptions extends FieldOptions {
   precision?: number;
   scale?: number;
+}
+
+export interface VectorFieldOptions extends Omit<
+  FieldOptions,
+  'default' | 'primaryKey' | 'unique' | 'generated' | 'index'
+> {
+  /** Number of floating-point entries stored in the vector. */
+  dimensions: number;
+  default?: VectorValue | null | SqlDefault;
+  /** Vector keys are not portable across the supported engines. */
+  primaryKey?: never;
+  unique?: never;
+  generated?: never;
+  index?: never;
 }
 
 export interface EnumFieldOptions<T extends string> extends FieldOptions {
@@ -80,6 +96,7 @@ export type ScalarFieldKind =
   | 'time'
   | 'datetime'
   | 'json'
+  | 'vector'
   | 'uuid'
   | 'enum';
 
@@ -154,6 +171,32 @@ interface JsonFieldFactory {
 const jsonFactory = ((options?: FieldOptions) =>
   scalar('json', options || {})) as JsonFieldFactory;
 
+interface VectorFieldFactory {
+  <const TOptions extends VectorFieldOptions>(
+    options: TOptions
+  ): ScalarFieldDefinition<number[], TOptions>;
+}
+
+const vectorFactory = ((options: VectorFieldOptions) => {
+  if (!options || !Number.isInteger(options.dimensions) || options.dimensions < 1) {
+    throw Error('vector dimensions must be a positive integer');
+  }
+  for (const option of ['primaryKey', 'unique', 'generated', 'index'] as const) {
+    if (option in options) {
+      throw Error(`vector fields do not support the ${option} option`);
+    }
+  }
+  const defaultValue = options.default;
+  if (
+    defaultValue !== undefined &&
+    defaultValue !== null &&
+    !(typeof defaultValue === 'object' && 'sql' in defaultValue)
+  ) {
+    validateVector(defaultValue, options.dimensions);
+  }
+  return scalar('vector', options);
+}) as VectorFieldFactory;
+
 interface ForeignKeyFactory {
   <TTarget extends RecordClass<any, any>>(
     target: (() => TTarget) | string
@@ -189,6 +232,7 @@ export const field = Object.freeze({
   time: scalarFactory<string, FieldOptions>('time'),
   datetime: scalarFactory<Date, FieldOptions>('datetime'),
   json: jsonFactory,
+  vector: vectorFactory,
   uuid: scalarFactory<string, FieldOptions>('uuid'),
   enum: <const T extends string, const TOptions extends EnumFieldOptions<T>>(
     options: EnumFieldOptions<T> & TOptions
@@ -711,6 +755,8 @@ function columnFromField(
   };
   if (definition.kind === 'string') {
     column.size = (options as StringFieldOptions).maxLength;
+  } else if (definition.kind === 'vector') {
+    column.dimensions = (options as VectorFieldOptions).dimensions;
   } else if (definition.kind === 'enum') {
     const enumOptions = options as unknown as EnumFieldOptions<string>;
     column.userDefinedType = {

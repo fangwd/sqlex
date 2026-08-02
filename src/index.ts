@@ -22,6 +22,7 @@ export type {
   Identifiable,
   TableUpdate,
   Value,
+  VectorValue,
 } from './types';
 
 export {
@@ -126,6 +127,7 @@ export type {
   ScalarFieldKind,
   SqlDefault,
   StringFieldOptions,
+  VectorFieldOptions,
 } from './orm';
 export { printSchema, exportSchemaJava, printSchemaTypeScript, printSchemaTypeMap } from './print';
 export { JsonSerialiser, XstreamSerialiser } from './serialiser';

@@ -670,6 +670,11 @@ export class UniqueKey {
 export function isValue(value: any): boolean {
   if (value === null) return true;
 
+  if (Array.isArray(value)) {
+    return value.length > 0 &&
+      value.every(entry => typeof entry === 'number');
+  }
+
   const type = typeof value;
   if (type === 'string' || type === 'number' || type === 'boolean') {
     return true;

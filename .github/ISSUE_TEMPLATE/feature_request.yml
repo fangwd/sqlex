@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a focused addition or API change
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Describe the problem and why current APIs do not address it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+    validations:
+      required: true
+  - type: textarea
+    id: dialects
+    attributes:
+      label: Database implications
+      description: Note any PostgreSQL, MySQL, or SQLite differences.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

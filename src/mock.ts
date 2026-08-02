@@ -65,7 +65,10 @@ function setFields(record: Record, data: Document) {
         } else if (field instanceof ForeignKeyField) {
           record[field.name] = _mock(db.table(field.referencedField), {});
         } else {
-          record[field.name] = getValue(getTypeName(field.column.type));
+          record[field.name] = getValue(
+            getTypeName(field.column.type),
+            field.column.dimensions
+          );
         }
       } else {
         if (field instanceof ForeignKeyField) {
@@ -137,12 +140,20 @@ const _next = {
   boolean: 1,
 };
 
-function getValue(type: DataType): Date | number | string | boolean | object {
+function getValue(
+  type: DataType,
+  dimensions?: number
+): Date | number | number[] | string | boolean | object {
   switch (type) {
     case 'Date':
       return new Date();
     case 'number':
       return _next.number++;
+    case 'number[]':
+      return Array.from(
+        { length: dimensions || 1 },
+        () => _next.number++
+      );
     case 'string':
       return config.stringPrefix + (_next.string++).toString(16);
     case 'boolean':

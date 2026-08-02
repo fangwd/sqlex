@@ -295,10 +295,20 @@ class SchemaBuilder {
       numeric_precision: number | null;
       numeric_scale: number | null;
       udt_name: string;
+      vector_dimensions: number | null;
     }>(this.connection, `
       select table_name, column_name, ordinal_position, column_default,
       is_nullable, data_type, character_maximum_length, numeric_precision,
-      numeric_scale, udt_name
+      numeric_scale, udt_name,
+      case when udt_name = 'vector' then (
+        select a.atttypmod
+        from pg_catalog.pg_attribute a
+        join pg_catalog.pg_class c on c.oid = a.attrelid
+        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        where c.relname = information_schema.columns.table_name
+          and n.nspname = information_schema.columns.table_schema
+          and a.attname = information_schema.columns.column_name
+      ) end as vector_dimensions
       from information_schema.columns
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
     `);
@@ -321,8 +331,15 @@ class SchemaBuilder {
         columnInfo.size = row.character_maximum_length ?? undefined;
       }
       else if (/USER-DEFINED/i.test(columnInfo.type)) {
-        columnInfo.type = 'varchar';
-        if (enumMap[row.udt_name]) {
+        if (row.udt_name === 'vector') {
+          columnInfo.type = 'vector';
+          columnInfo.dimensions = row.vector_dimensions !== null &&
+            row.vector_dimensions > 0
+            ? row.vector_dimensions
+            : undefined;
+        }
+        else if (enumMap[row.udt_name]) {
+          columnInfo.type = 'varchar';
           const values = enumMap[row.udt_name];
           columnInfo.size = Math.max(...(values.map(value => value.length)));
           columnInfo.userDefinedType = {
@@ -332,6 +349,7 @@ class SchemaBuilder {
           }
         }
         else {
+          columnInfo.type = 'varchar';
           columnInfo.size = 255;
           (columnInfo as ColumnInfo & { udt?: string }).udt = row.udt_name;
         }

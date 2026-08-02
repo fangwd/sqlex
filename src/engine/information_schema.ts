@@ -103,7 +103,10 @@ class SqliteBuilder {
           type: baseType.toLowerCase(),
           nullable: !(c.notnull || c.pk > 0)
         };
-        if (/char|text/i.test(baseType)) {
+        if (/^vector$/i.test(baseType)) {
+          const dimensions = /\(\s*(\d+)\s*\)/.exec(declared);
+          if (dimensions) columnInfo.dimensions = Number(dimensions[1]);
+        } else if (/char|text/i.test(baseType)) {
           const m = /\(\s*(\d+)/.exec(declared);
           if (m) columnInfo.size = Number(m[1]);
         } else if (/^(decimal|numeric)$/i.test(baseType)) {
@@ -279,7 +282,7 @@ class Builder {
       `
         select table_name, column_name, ordinal_position, column_default,
         is_nullable, data_type, character_maximum_length, numeric_precision,
-        numeric_scale, extra
+        numeric_scale, column_type, extra
         from information_schema.columns
         where table_schema = ${this.escapedSchemaName}`
     ).then(rows => {
@@ -294,6 +297,10 @@ class Builder {
         };
         if (/char|text/i.exec(columnInfo.type)) {
           columnInfo.size = row.character_maximum_length as number;
+        }
+        if (/^vector$/i.test(columnInfo.type)) {
+          const dimensions = /\(\s*(\d+)\s*\)/.exec(row.column_type as string);
+          if (dimensions) columnInfo.dimensions = Number(dimensions[1]);
         }
         if (/^(decimal|numeric)$/i.test(columnInfo.type)) {
           columnInfo.precision = row.numeric_precision as number;

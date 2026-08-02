@@ -19,6 +19,7 @@ import {
   type RecordClassMap,
   schemaFromRecords,
 } from './orm';
+import { encodeVector, isVectorColumn } from './vector';
 
 export interface MigrationColumn extends Column {
   defaultSql?: string;
@@ -465,6 +466,11 @@ export class MigrationCompiler {
 
   private type(column: MigrationColumn): string {
     const type = column.type.toLowerCase();
+    if (type === 'vector') {
+      return column.dimensions === undefined
+        ? 'vector'
+        : `vector(${column.dimensions})`;
+    }
     if (type === 'varchar' || type === 'string') {
       return `varchar(${column.size || 255})`;
     }
@@ -501,6 +507,10 @@ export class MigrationCompiler {
     if (column.defaultSql) return column.defaultSql;
     if (column.default === undefined) return undefined;
     if (column.default === null) return 'null';
+    if (isVectorColumn(column)) {
+      const encoded = encodeVector(column.default, column, this.encoder);
+      return this.dialect === 'mysql' ? `(${encoded})` : encoded;
+    }
     if (typeof column.default === 'boolean') {
       return column.default ? 'true' : 'false';
     }
@@ -1275,6 +1285,15 @@ function sameColumnDefault(
     return !Number.isNaN(parsed.valueOf()) &&
       parsed.valueOf() === wanted.valueOf();
   }
+  if (Array.isArray(wanted)) {
+    const vector = /\[[^\]]*\]/.exec(String(found));
+    if (!vector) return false;
+    try {
+      return stableStringify(JSON.parse(vector[0])) === stableStringify(wanted);
+    } catch {
+      return false;
+    }
+  }
   return literal === String(wanted);
 }
 
@@ -1284,6 +1303,9 @@ function sameColumnDimensions(
   dialect: Dialect
 ): boolean {
   const type = normalizeColumnType(expected.type, dialect);
+  if (type === 'vector') {
+    return actual.dimensions === expected.dimensions;
+  }
   if (type === 'varchar') {
     const expectedSize =
       dialect === 'mysql' && expected.type.toLowerCase() === 'uuid'
@@ -1301,6 +1323,9 @@ function sameColumnDimensions(
 }
 
 function formatColumnDimensions(column: Column): string {
+  if (column.dimensions !== undefined) {
+    return String(column.dimensions);
+  }
   if (column.precision !== undefined) {
     return `${column.precision},${column.scale ?? 0}`;
   }

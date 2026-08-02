@@ -2,6 +2,12 @@ import { ConnectionInfo, createConnectionPool, resolveConnectionInfo } from './e
 import { flushDatabase, replaceRecord, FlushOptions } from './flush';
 import { Record, getModel, runtimeOf, type DynamicRecord } from './record';
 import {
+  decodeVector,
+  encodeVector,
+  isEmptyVectorRepresentation,
+  isVectorColumn,
+} from './vector';
+import {
   bindRecords,
   BoundModels,
   RecordClassMap,
@@ -859,6 +865,9 @@ export class Table<TSpec = any> {
     }
     if (typeof field === 'string') {
       field = this.model.field(field) as SimpleField;
+    }
+    if (isVectorColumn(field.column)) {
+      return encodeVector(value, field.column, this.db.pool);
     }
     // json columns store any non-null value (including booleans and numbers) as a
     // JSON literal, so this must come before the boolean/number branches below.
@@ -1748,6 +1757,16 @@ export function _toCamel(value: Value | any, field: SimpleField): Value | any {
   if (value === null || value === undefined) return null;
 
   if (value instanceof Record) return value;
+
+  if (isVectorColumn(field.column)) {
+    // mysql2 currently decodes SQL NULL for a native VECTOR column as [].
+    // Native vectors cannot be empty, so the nullable column metadata makes
+    // this representation unambiguous.
+    if (field.column.nullable && isEmptyVectorRepresentation(value)) {
+      return null;
+    }
+    return decodeVector(value, field.column);
+  }
 
   if (/text|string/i.test(field.column.type)) {
     return value;

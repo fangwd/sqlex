@@ -24,6 +24,7 @@ import {
   ComputedField,
   Model as TableModel,
 } from './schema';
+import { encodeVector, isVectorColumn } from './vector';
 import { Document, Value } from './types';
 import { DialectEncoder } from './engine';
 import { toArray } from './misc';
@@ -430,6 +431,25 @@ export class QueryBuilder {
       field instanceof ComputedField
         ? this.escapeId(field.name)
         : this.encodeField(field.column.name);
+    if (
+      field instanceof SimpleField &&
+      isVectorColumn(field.column) &&
+      Array.isArray(value) &&
+      value.every(entry => typeof entry === 'number')
+    ) {
+      operator = operator || '=';
+      if (operator === 'in' || operator === 'notIn') {
+        throw Error(
+          `vector '${operator}' filter expects an array of vectors; ` +
+          `use '${field.name}' for equality`
+        );
+      }
+      if (!['=', '<>', 'ne'].includes(operator)) {
+        throw Error(`Unsupported vector operator: ${operator}`);
+      }
+      const sqlOperator = operator === 'ne' ? '<>' : operator;
+      return `${lhs} ${sqlOperator} ${this.escape(field, value as Value)}`;
+    }
     if (Array.isArray(value)) {
       if (!operator || operator === 'in' || operator === 'notIn') {
         return this.listExpr(lhs, operator, value, (value) => this.escape(field, value));
@@ -1110,6 +1130,9 @@ export class QueryBuilder {
   private escape(field: SimpleField | ComputedField, value: Value): string {
     if (field instanceof ComputedField) {
       return this.dialect.escape(value);
+    }
+    if (isVectorColumn(field.column)) {
+      return encodeVector(value, field.column, this.dialect);
     }
     if (/^bool/i.test(field.column.type)) {
       return value ? 'true' : 'false';

@@ -1,6 +1,6 @@
 {
   "name": "sqlex",
-  "version": "4.0.1",
+  "version": "4.1.0",
   "description": "Typed ORM, migrations, and relation-aware database access for PostgreSQL, MySQL, and SQLite",
   "main": "./dist/index.js",
   "type": "commonjs",

@@ -323,7 +323,7 @@ function relatedMutationType(field: RelatedField): string {
   return `RelatedMutation<${model.name}Filter, ${model.name}Create, ${model.name}Update>`;
 }
 
-export type DataType = 'Date' | 'number' | 'string' | 'boolean' | 'object';
+export type DataType = 'Date' | 'number' | 'number[]' | 'string' | 'boolean' | 'object';
 
 export function getTypeName(name: string): DataType {
   if (/date|time/i.test(name)) {
@@ -348,6 +348,10 @@ export function getTypeName(name: string): DataType {
 
   if (/^json/i.test(name)) {
     return 'object';
+  }
+
+  if (/^vector/i.test(name)) {
+    return 'number[]';
   }
 
   if (/enum/i.test(name)) {
@@ -530,6 +534,10 @@ function getTypeNameJava(name: string) {
 
   if (/^json/i.test(name)) {
     return 'String';
+  }
+
+  if (/^vector/i.test(name)) {
+    return 'double[]';
   }
 
   throw Error(`Unknown type '${name}'`);
