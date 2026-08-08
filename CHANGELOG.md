@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- `field.datetime({ timezone: true })` compiles to `timestamptz` on PostgreSQL,
+  which keeps the offset and compares correctly across session time zones.
+  MySQL and SQLite have a single timestamp type, so only PostgreSQL changes.
+  Note that migration baselining normalises every `timestamp*` column to one
+  type, so it does not report a plain/offset-aware mismatch.
 - `field.json({ binary: true })` stores in the engine's binary JSON type:
   `jsonb` on PostgreSQL, which is indexable, supports the containment and path
   operators, and is what `jsonb_typeof` requires. MySQL's `json` is already

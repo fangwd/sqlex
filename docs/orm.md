@@ -52,12 +52,24 @@ Fields support `nullable`, `primaryKey`, `unique`, `generated`, `default`,
 | `field.boolean()` | `boolean` | Uses dialect-appropriate storage |
 | `field.date()` | `Date` | Date value |
 | `field.time()` | `string` | Time value |
-| `field.datetime()` | `Date` | Timestamp/datetime value |
+| `field.datetime()` | `Date` | Timestamp value; `timezone: true` for `timestamptz` |
 | `field.json<T>()` | `T` | Generic JSON value type; `binary: true` for `jsonb` |
 | `field.vector()` | `number[]` | Requires `dimensions`; dense vector/embedding |
 | `field.uuid()` | `string` | Native or dialect-appropriate UUID storage |
 | `field.enum()` | Literal union | Requires `values`; accepts `typeName` |
 | `field.foreignKey()` | Target record | Accepts a record or primary key when writing |
+
+### Time zones
+
+`field.datetime({ timezone: true })` compiles to `timestamptz` on PostgreSQL,
+which stores the instant with its offset and compares correctly regardless of
+the session time zone. Prefer it for absolute times — created and updated
+stamps, expiries, audit trails — and leave it off for wall-clock values that
+belong to no particular zone, such as an opening time. MySQL and SQLite have one
+timestamp type each, so the option only changes the PostgreSQL column type.
+
+Be aware that `baseline` normalises every `timestamp*` column to a single type,
+so it will not report a plain column where an offset-aware one was declared.
 
 ### Binary JSON
 

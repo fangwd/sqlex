@@ -31,22 +31,38 @@ class Doc extends defineRecord({
     id: field.id(),
     plain: field.json<Payload>({ nullable: true }),
     binary: field.json<Payload>({ binary: true, nullable: true }),
+    localAt: field.datetime({ column: 'local_at', nullable: true }),
+    zonedAt: field.datetime({ column: 'zoned_at', timezone: true, nullable: true }),
   },
 }) {}
 
 beforeAll(() => helper.createDatabase(NAME, false));
 afterAll(() => helper.dropDatabase(NAME));
 
+const createSql = (dialect: Dialect): string => {
+  const { migration } = makeMigration('0001_docs', { Doc });
+  const create = migration.up.find(op => op.kind === 'createTable')!;
+  return new MigrationCompiler(dialect, encoder(dialect)).compile(create)[0];
+};
+
 test.each([
   ['postgres', '"plain" json', '"binary" jsonb'],
   ['mysql', '`plain` json', '`binary` json'],
   ['sqlite3', '"plain" text', '"binary" text'],
 ] as const)('%s maps binary json to its own storage type', (dialect, plain, binary) => {
-  const { migration } = makeMigration('0001_docs', { Doc });
-  const create = migration.up.find(op => op.kind === 'createTable')!;
-  const sql = new MigrationCompiler(dialect, encoder(dialect)).compile(create)[0];
+  const sql = createSql(dialect);
   expect(sql).toContain(plain);
   expect(sql).toContain(binary);
+});
+
+test.each([
+  ['postgres', '"local_at" timestamp', '"zoned_at" timestamptz'],
+  ['mysql', '`local_at` datetime', '`zoned_at` datetime'],
+  ['sqlite3', '"local_at" datetime', '"zoned_at" datetime'],
+] as const)('%s keeps an offset-aware timestamp distinct', (dialect, local, zoned) => {
+  const sql = createSql(dialect);
+  expect(sql).toContain(local);
+  expect(sql).toContain(zoned);
 });
 
 test('binary json round-trips like a plain json column', async () => {

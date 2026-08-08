@@ -95,6 +95,7 @@ export type ScalarFieldKind =
   | 'date'
   | 'time'
   | 'datetime'
+  | 'timestamptz'
   | 'json'
   | 'jsonb'
   | 'vector'
@@ -161,6 +162,30 @@ const idFactory = ((options?: FieldOptions) =>
     primaryKey: true,
     generated: true,
   })) as IdFieldFactory;
+
+export interface DatetimeFieldOptions extends FieldOptions {
+  /**
+   * Store the instant with its offset: `timestamptz` on PostgreSQL, which
+   * compares and converts correctly across session time zones. Prefer it for
+   * absolute times such as created/updated stamps; leave it off for wall-clock
+   * values that belong to no particular zone. MySQL and SQLite have one
+   * timestamp type each, so this only changes the PostgreSQL column type.
+   */
+  timezone?: boolean;
+}
+
+interface DatetimeFieldFactory {
+  (): ScalarFieldDefinition<Date, {}>;
+  <const TOptions extends DatetimeFieldOptions>(
+    options: TOptions
+  ): ScalarFieldDefinition<Date, TOptions>;
+}
+
+const datetimeFactory = ((options?: DatetimeFieldOptions) =>
+  scalar(
+    options?.timezone ? 'timestamptz' : 'datetime',
+    options || {}
+  )) as DatetimeFieldFactory;
 
 export interface JsonFieldOptions extends FieldOptions {
   /**
@@ -241,7 +266,7 @@ export const field = Object.freeze({
   boolean: scalarFactory<boolean, FieldOptions>('boolean'),
   date: scalarFactory<Date, FieldOptions>('date'),
   time: scalarFactory<string, FieldOptions>('time'),
-  datetime: scalarFactory<Date, FieldOptions>('datetime'),
+  datetime: datetimeFactory,
   json: jsonFactory,
   vector: vectorFactory,
   uuid: scalarFactory<string, FieldOptions>('uuid'),
@@ -831,6 +856,7 @@ function columnType(definition: ScalarFieldDefinition): string {
     case 'decimal': return 'decimal';
     case 'boolean': return 'boolean';
     case 'datetime': return 'datetime';
+    case 'timestamptz': return 'timestamptz';
     case 'json': return 'json';
     case 'jsonb': return 'jsonb';
     case 'uuid': return 'uuid';

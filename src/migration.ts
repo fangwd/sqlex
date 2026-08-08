@@ -531,6 +531,10 @@ export class MigrationCompiler {
     if (type === 'datetime') {
       return this.dialect === 'postgres' ? 'timestamp' : 'datetime';
     }
+    if (type === 'timestamptz') {
+      // Only PostgreSQL distinguishes an offset-aware timestamp.
+      return this.dialect === 'postgres' ? 'timestamptz' : 'datetime';
+    }
     if (type === 'double' || type === 'float') {
       return this.dialect === 'postgres' ? 'double precision' : 'double';
     }
