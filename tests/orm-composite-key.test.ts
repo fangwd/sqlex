@@ -136,6 +136,37 @@ test('composite keys round-trip through create, get, update and delete', async (
   await db.end();
 });
 
+test('selecting foreign keys works on a composite-key table', async () => {
+  const db = helper.connectToDatabase(NAME) as Database;
+  const models = db.bind({ Team, Person, Membership, Reading });
+
+  const team = await models.Team.create({ name: `Sel ${Date.now()}` });
+  const person = await models.Person.create({ email: `sel-${Date.now()}@example.com` });
+  await models.Membership.create({ team, person, role: 'lead' });
+
+  // Both key parts are foreign keys, so this select resolves relations on a
+  // table whose own primary key is composite.
+  //
+  // The filter uses nested form: `filter({ team: id }).select({ team: '*' })`
+  // trips a separate bug in extendFilter, which tries to widen the scalar id
+  // into a field selection.
+  const [row] = await models.Membership
+    .filter({ team: { id: team.id }, person: { id: person.id } })
+    .select({ team: '*', person: '*' })
+    .all();
+
+  expect(row.team.name).toBe(team.name);
+  expect(row.person.email).toBe(person.email);
+  expect(row.role).toBe('lead');
+
+  // exists() probes the first key part, which here is a foreign key whose
+  // column name differs from its field name.
+  expect(await models.Membership.filter({ team: { id: team.id } }).exists()).toBe(true);
+  expect(await models.Membership.filter({ team: { id: team.id + 9999 } }).exists()).toBe(false);
+
+  await db.end();
+});
+
 test('a composite key cannot be generated or referenced by a foreign key', () => {
   expect(() =>
     makeMigration('0001_bad_generated', {

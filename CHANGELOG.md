@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [4.2.2]
 
 ### Added
 
@@ -15,6 +15,16 @@ All notable changes to this project are documented in this file.
   `jsonb` on PostgreSQL, which is indexable, supports the containment and path
   operators, and is what `jsonb_typeof` requires. MySQL's `json` is already
   binary and SQLite keeps `text`, so only the PostgreSQL column type changes.
+
+### Fixed
+
+- Selecting a foreign key on a table with a composite primary key threw. The
+  table's own key is only needed to group reverse (to-many) relations, so it is
+  now resolved lazily, and a to-many relation that genuinely needs a single key
+  reports that instead of failing on a null assertion.
+- `QuerySet.exists()` probed the primary key's *field* name, which differs from
+  its column when the first key part is a foreign key (`scene` vs `scene_id`) —
+  as it is on a composite-key link table. It now probes by column.
 
 ## [4.2.0]
 

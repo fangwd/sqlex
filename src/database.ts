@@ -458,8 +458,25 @@ export class Table<TSpec = any> {
       return Promise.resolve(result);
     }
 
-    const pk = this.model.keyField()!.name;
-    const values = result.map(row => this.model.valueOf(row, pk) as Value);
+    // Only reverse (to-many) relations need this table's own key to group their
+    // rows by, and a composite key cannot serve as one. Resolve it lazily so a
+    // select of plain foreign keys still works on a composite-key table.
+    let keyValues: Value[] | undefined;
+    const ownKeyValues = (): Value[] => {
+      if (!keyValues) {
+        const keyField = this.model.keyField();
+        if (!keyField) {
+          throw Error(
+            `${this.model.name}: cannot resolve a related field on a table ` +
+            'with a composite primary key'
+          );
+        }
+        keyValues = result.map(
+          row => this.model.valueOf(row, keyField.name) as Value
+        );
+      }
+      return keyValues;
+    };
 
     for (const name in fields) {
       const field = this.model.field(name);
@@ -489,7 +506,7 @@ export class Table<TSpec = any> {
         const rows = await this._selectRelated(
           connection,
           field,
-          values,
+          ownKeyValues(),
           fields,
           options
         );

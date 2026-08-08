@@ -544,7 +544,10 @@ export class QuerySet<TClass extends RecordClass> {
   }
 
   async exists(): Promise<boolean> {
-    const key = this.table.model.primaryKey.fields[0].name;
+    // Probe by column, not field: a foreign key's field name ("scene") differs
+    // from its column ("scene_id"), which surfaces as soon as the first primary
+    // key part is a foreign key — as it is on a composite-key link table.
+    const key = this.table.model.primaryKey.fields[0].column.name;
     const rows = await this.table.select<Document>(key, {
       ...this.options,
       limit: 1,
