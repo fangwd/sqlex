@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `field.json({ binary: true })` stores in the engine's binary JSON type:
+  `jsonb` on PostgreSQL, which is indexable, supports the containment and path
+  operators, and is what `jsonb_typeof` requires. MySQL's `json` is already
+  binary and SQLite keeps `text`, so only the PostgreSQL column type changes.
+
 ## [4.2.0]
 
 ### Added

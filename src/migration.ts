@@ -523,6 +523,11 @@ export class MigrationCompiler {
         ? `decimal(${column.precision},${column.scale || 0})`
         : 'decimal';
     }
+    if (type === 'jsonb') {
+      if (this.dialect === 'postgres') return 'jsonb';
+      // MySQL's json is already a binary representation; SQLite stores text.
+      return this.dialect === 'sqlite3' ? 'text' : 'json';
+    }
     if (type === 'datetime') {
       return this.dialect === 'postgres' ? 'timestamp' : 'datetime';
     }
@@ -1272,8 +1277,10 @@ function normalizeColumnType(type: string, dialect: Dialect): string {
   const value = type.toLowerCase().replace(/\(.*/, '');
   if (dialect === 'sqlite3') {
     if (value === 'boolean') return 'integer';
-    if (value === 'json' || value === 'uuid') return 'text';
+    if (value === 'json' || value === 'jsonb' || value === 'uuid') return 'text';
   }
+  // MySQL has one json type; a binary-json declaration lands on it.
+  if (dialect === 'mysql' && value === 'jsonb') return 'json';
   if (dialect === 'mysql') {
     if (value === 'tinyint') return 'boolean';
     if (value === 'uuid') return 'char';

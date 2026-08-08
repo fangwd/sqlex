@@ -53,11 +53,25 @@ Fields support `nullable`, `primaryKey`, `unique`, `generated`, `default`,
 | `field.date()` | `Date` | Date value |
 | `field.time()` | `string` | Time value |
 | `field.datetime()` | `Date` | Timestamp/datetime value |
-| `field.json<T>()` | `T` | Generic JSON value type |
+| `field.json<T>()` | `T` | Generic JSON value type; `binary: true` for `jsonb` |
 | `field.vector()` | `number[]` | Requires `dimensions`; dense vector/embedding |
 | `field.uuid()` | `string` | Native or dialect-appropriate UUID storage |
 | `field.enum()` | Literal union | Requires `values`; accepts `typeName` |
 | `field.foreignKey()` | Target record | Accepts a record or primary key when writing |
+
+### Binary JSON
+
+`field.json({ binary: true })` selects the engine's binary JSON storage. On
+PostgreSQL that is `jsonb`, which is indexable and supports the containment and
+path operators — and is required by `jsonb_typeof` and the other `jsonb_*`
+functions, so prefer it there unless you need to preserve key order and
+whitespace. MySQL's `json` is already binary and SQLite still stores `text`, so
+the option only changes the PostgreSQL column type. Reading and writing are
+identical either way: values are serialised on write and parsed on read.
+
+```ts
+metadata: field.json<Metadata>({ binary: true, default: sqlDefault("'{}'::jsonb") }),
+```
 
 ### Vector and embedding fields
 

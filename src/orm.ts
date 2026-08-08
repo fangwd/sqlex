@@ -96,6 +96,7 @@ export type ScalarFieldKind =
   | 'time'
   | 'datetime'
   | 'json'
+  | 'jsonb'
   | 'vector'
   | 'uuid'
   | 'enum';
@@ -161,15 +162,25 @@ const idFactory = ((options?: FieldOptions) =>
     generated: true,
   })) as IdFieldFactory;
 
+export interface JsonFieldOptions extends FieldOptions {
+  /**
+   * Store in the engine's binary JSON representation: `jsonb` on PostgreSQL,
+   * which is indexable and supports the containment and path operators (and is
+   * what `jsonb_typeof` and friends require). MySQL's `json` is already binary
+   * and SQLite keeps `text`, so this only changes the PostgreSQL column type.
+   */
+  binary?: boolean;
+}
+
 interface JsonFieldFactory {
   <T = unknown>(): ScalarFieldDefinition<T, {}>;
-  <T = unknown, const TOptions extends FieldOptions = FieldOptions>(
+  <T = unknown, const TOptions extends JsonFieldOptions = JsonFieldOptions>(
     options: TOptions
   ): ScalarFieldDefinition<T, TOptions>;
 }
 
-const jsonFactory = ((options?: FieldOptions) =>
-  scalar('json', options || {})) as JsonFieldFactory;
+const jsonFactory = ((options?: JsonFieldOptions) =>
+  scalar(options?.binary ? 'jsonb' : 'json', options || {})) as JsonFieldFactory;
 
 interface VectorFieldFactory {
   <const TOptions extends VectorFieldOptions>(
@@ -821,6 +832,7 @@ function columnType(definition: ScalarFieldDefinition): string {
     case 'boolean': return 'boolean';
     case 'datetime': return 'datetime';
     case 'json': return 'json';
+    case 'jsonb': return 'jsonb';
     case 'uuid': return 'uuid';
     case 'enum': return 'enum';
     default: return definition.kind;
