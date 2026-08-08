@@ -240,12 +240,37 @@ export const field = Object.freeze({
   foreignKey: foreignKeyFactory,
 });
 
+/**
+ * A multi-column index. `where` makes it partial (PostgreSQL and SQLite).
+ * Field names are plain strings so a record class stays assignable to
+ * `RecordClass`; unknown names are rejected when the schema is built.
+ */
+export interface RecordIndexDefinition {
+  fields: readonly string[];
+  name?: string;
+  unique?: boolean;
+  where?: string;
+}
+
+/** A named table check constraint. The expression is emitted verbatim. */
+export interface RecordCheckDefinition {
+  name?: string;
+  expression: string;
+}
+
 export interface RecordDefinition<
   TFields extends FieldDefinitions = FieldDefinitions
 > {
   table: string;
   name?: string;
   fields: TFields;
+  /**
+   * Composite unique constraints, each a list of field names. Single-column
+   * uniqueness is better expressed with the field's own `unique` option.
+   */
+  unique?: readonly (readonly string[])[];
+  indexes?: readonly RecordIndexDefinition[];
+  checks?: readonly RecordCheckDefinition[];
 }
 
 type FieldValue<TField extends AnyFieldDefinition> =
@@ -682,17 +707,16 @@ function tableFromRecord(
 ): DatabaseDefinition['tables'][number] {
   const columns: Column[] = [];
   const constraints: Constraint[] = [];
+  // Primary key columns are gathered rather than emitted per field: several
+  // fields marked primaryKey form one composite key, not one key each.
+  const primaryKeyColumns: string[] = [];
 
   for (const [name, definition] of Object.entries(recordClass.definition.fields)) {
     const column = columnFromField(name, definition, recordClass, registered);
     columns.push(column);
 
     if (definition.options.primaryKey) {
-      constraints.push({
-        name: `${recordClass.definition.table}_pkey`,
-        columns: [column.name],
-        primaryKey: true,
-      });
+      primaryKeyColumns.push(column.name);
     }
     if (definition.options.unique) {
       constraints.push({
@@ -713,6 +737,25 @@ function tableFromRecord(
         },
       });
     }
+  }
+
+  if (primaryKeyColumns.length) {
+    constraints.unshift({
+      name: `${recordClass.definition.table}_pkey`,
+      columns: primaryKeyColumns,
+      primaryKey: true,
+    });
+  }
+
+  for (const group of recordClass.definition.unique || []) {
+    const groupColumns = group.map(fieldName =>
+      columnName(fieldName, fieldDefinition(recordClass, fieldName))
+    );
+    constraints.push({
+      name: `${recordClass.definition.table}_${groupColumns.join('_')}_key`,
+      columns: groupColumns,
+      unique: true,
+    });
   }
 
   return { name: recordClass.definition.table, columns, constraints };
@@ -789,13 +832,30 @@ function columnName(name: string, definition: AnyFieldDefinition): string {
     (definition.kind === 'foreignKey' ? `${name}_id` : name);
 }
 
+function fieldDefinition(
+  recordClass: RecordClass,
+  fieldName: string
+): AnyFieldDefinition {
+  const definition = recordClass.definition.fields[fieldName];
+  if (!definition) {
+    throw Error(`${recordClass.definition.table}: unknown field ${fieldName}`);
+  }
+  return definition;
+}
+
 function primaryField(recordClass: RecordClass): [string, AnyFieldDefinition] {
-  const entry = Object.entries(recordClass.definition.fields)
-    .find(([, definition]) => definition.options.primaryKey);
-  if (!entry) {
+  const entries = Object.entries(recordClass.definition.fields)
+    .filter(([, definition]) => definition.options.primaryKey);
+  if (!entries.length) {
     throw Error(`${recordClass.definition.table}: no primary key field`);
   }
-  return entry;
+  if (entries.length > 1) {
+    throw Error(
+      `${recordClass.definition.table}: cannot be referenced by a foreign ` +
+      'key because its primary key is composite'
+    );
+  }
+  return entries[0];
 }
 
 function literalDefault(value: Value | SqlDefault | undefined): Value | undefined {
@@ -820,8 +880,19 @@ function validateRecordDefinition(
   const { table, fields } = recordClass.definition;
   const primaryKeys = Object.entries(fields)
     .filter(([, definition]) => definition.options.primaryKey);
-  if (primaryKeys.length !== 1) {
-    throw Error(`${table}: expected exactly one primary key field`);
+  if (primaryKeys.length === 0) {
+    throw Error(`${table}: expected at least one primary key field`);
+  }
+  if (primaryKeys.length > 1) {
+    const generated = primaryKeys.find(
+      ([, definition]) => definition.options.generated
+    );
+    if (generated) {
+      throw Error(
+        `${table}.${generated[0]}: a generated field cannot be part of a ` +
+        'composite primary key'
+      );
+    }
   }
 
   for (const [name, definition] of Object.entries(fields)) {

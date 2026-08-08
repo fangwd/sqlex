@@ -31,6 +31,16 @@ export interface MigrationIndex {
   name: string;
   columns: string[];
   unique?: boolean;
+  /**
+   * Partial index predicate, emitted verbatim as `where <expression>`.
+   * PostgreSQL and SQLite only; MySQL has no partial indexes.
+   */
+  where?: string;
+}
+
+export interface MigrationCheck {
+  name: string;
+  expression: string;
 }
 
 export interface MigrationTable {
@@ -38,6 +48,7 @@ export interface MigrationTable {
   columns: MigrationColumn[];
   constraints: MigrationConstraint[];
   indexes: MigrationIndex[];
+  checks?: MigrationCheck[];
 }
 
 export interface MigrationSchema {
@@ -211,7 +222,35 @@ export function migrationSchemaFromRecords(
           columns: [column],
         }];
       });
-      return { ...table, columns, constraints, indexes };
+      const columnOf = (fieldName: string): string => {
+        const definition = recordClass.definition.fields[fieldName];
+        if (!definition) {
+          throw Error(`${table.name}: unknown field ${fieldName} in index`);
+        }
+        return getColumnName(fieldName, definition);
+      };
+      for (const declared of recordClass.definition.indexes || []) {
+        const indexColumns = declared.fields.map(columnOf);
+        indexes.push({
+          name: declared.name || `${table.name}_${indexColumns.join('_')}_idx`,
+          columns: indexColumns,
+          ...(declared.unique ? { unique: true } : {}),
+          ...(declared.where ? { where: declared.where } : {}),
+        });
+      }
+      const checks = (recordClass.definition.checks || []).map(
+        (check, position) => ({
+          name: check.name || `${table.name}_check_${position + 1}`,
+          expression: check.expression,
+        })
+      );
+      return {
+        ...table,
+        columns,
+        constraints,
+        indexes,
+        ...(checks.length ? { checks } : {}),
+      };
     }),
   };
 }
@@ -424,6 +463,11 @@ export class MigrationCompiler {
       if (inlineSqlitePrimary && constraint === singlePrimary) continue;
       definitions.push(this.constraint(constraint));
     }
+    for (const check of table.checks || []) {
+      definitions.push(
+        `constraint ${this.id(check.name)} check (${check.expression})`
+      );
+    }
     return (
       `create table ${this.id(table.name)} (` +
       definitions.join(', ') +
@@ -548,9 +592,15 @@ export class MigrationCompiler {
   private createIndex(table: string, index: MigrationIndex): string {
     const unique = index.unique ? 'unique ' : '';
     const columns = index.columns.map(column => this.id(column)).join(', ');
+    if (index.where && this.dialect === 'mysql') {
+      throw Error(
+        `${table}.${index.name}: MySQL does not support partial indexes`
+      );
+    }
+    const where = index.where ? ` where ${index.where}` : '';
     return (
       `create ${unique}index ${this.id(index.name)} on ` +
-      `${this.id(table)} (${columns})`
+      `${this.id(table)} (${columns})${where}`
     );
   }
 

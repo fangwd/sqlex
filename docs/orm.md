@@ -134,6 +134,69 @@ export class Post extends defineRecord({
 Always use `declare` when adding field types to a record class body — an
 initialized class field is not model data, and its value is ignored.
 
+### Composite primary keys
+
+Mark more than one field `primaryKey` to key a table by the combination, which
+is the usual shape for a link table:
+
+```ts
+export class Membership extends defineRecord({
+  table: 'membership',
+  fields: {
+    team: field.foreignKey(() => Team, { primaryKey: true, relatedName: 'memberships' }),
+    person: field.foreignKey(() => Person, { primaryKey: true, relatedName: 'memberships' }),
+    role: field.string({ maxLength: 20, default: 'member' }),
+  },
+}) {}
+
+await models.Membership.get({ team: 1, person: 2 });
+```
+
+Every key part is required when creating, and `get`, `filter`, `update`, and
+`delete` all take the full key. A composite key cannot include a `generated`
+field, and a table with one cannot be the target of a foreign key, because
+composite foreign keys are not supported.
+
+### Table-level constraints and indexes
+
+Constraints that span several columns are declared beside `fields`:
+
+```ts
+export class Item extends defineRecord({
+  table: 'item',
+  fields: {
+    id: field.id(),
+    ownerId: field.integer({ column: 'owner_id', nullable: true }),
+    code: field.string({ maxLength: 40 }),
+    score: field.float({ default: 0 }),
+  },
+  unique: [['ownerId', 'code']],
+  indexes: [
+    { fields: ['code', 'score'] },
+    { fields: ['code'], unique: true, where: 'owner_id is null' },
+  ],
+  checks: [{ expression: 'score >= 0 and score <= 100' }],
+}) {}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `unique` | Composite unique keys, each a list of field names |
+| `indexes` | Multi-column indexes; `unique` and `where` are optional |
+| `checks` | Named check constraints, emitted verbatim |
+
+Names are generated from the table and columns when omitted.
+
+`unique` and a unique `index` are not the same thing. A `unique` entry is a real
+unique key: the model uses it for identity, so `create` resolves an existing row
+by it and every member must be supplied. A unique `index` is enforced by the
+database only, which is what a partial index needs — `where` narrows it to the
+rows it covers, so nullable members are fine there.
+
+Partial indexes are PostgreSQL and SQLite only; compiling one for MySQL raises
+an error rather than emitting invalid SQL. Check expressions are passed through
+untouched, so keep them portable if you target more than one engine.
+
 TypeScript does not allow a class to reference itself in its own base
 expression. For self-references or mutually cyclic class types, use the explicit
 form and declare the instance fields:

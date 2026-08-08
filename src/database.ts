@@ -1623,7 +1623,11 @@ export class Table<TSpec = any> {
           connection
         )
         .then(rows => {
-          const id = field.referencingField.model.keyField()!.name;
+          // The grouping value lives on the referenced (parent) document, so
+          // key it by the field the foreign key points at. Using the
+          // referencing model's own key breaks when the child has a composite
+          // primary key, or when the parent's key is not named "id".
+          const id = field.referencingField.referencedField.name;
           if (field.referencingField.isUnique()) {
             return values.map(key => {
               const row = rows.find(row => (row[name] as Document)[id] === key);
@@ -1638,7 +1642,7 @@ export class Table<TSpec = any> {
     } else {
       (options.where as Document)[name] = values;
       return table.select(fields, options, undefined, connection).then(rows => {
-        const id = field.referencingField.model.keyField()!.name;
+        const id = field.referencingField.referencedField.name;
         if (field.referencingField.isUnique()) {
           return values.map(key => {
             const row = rows.find(row => row[name] && (row[name] as Document)[id] === key);

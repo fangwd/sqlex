@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Composite primary keys in the ORM: several fields may be marked `primaryKey`
+  and are keyed as one constraint. A generated field cannot take part, and a
+  record with a composite key cannot be a foreign-key target.
+- Table-level `unique`, `indexes`, and `checks` on a record definition, for
+  composite unique keys, multi-column indexes, partial indexes (`where`, on
+  PostgreSQL and SQLite), and named check constraints.
+
+### Fixed
+
+- Reverse relation loading keyed rows by the referencing model's own primary
+  key, which returned nothing when the child had a composite primary key and
+  was wrong whenever the parent's key was not named `id`. It now uses the field
+  the foreign key references.
+- Compiling a partial index for MySQL raises an error instead of emitting an
+  index without its predicate.
+
 ## [4.0.0]
 
 ### Added
