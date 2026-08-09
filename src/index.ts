@@ -129,7 +129,7 @@ export type {
   StringFieldOptions,
   VectorFieldOptions,
 } from './orm';
-export { printSchema, exportSchemaJava, printSchemaTypeScript, printSchemaTypeMap } from './print';
+export { printSchema, exportSchemaJava, printSchemaTypeMap } from './print';
 export { JsonSerialiser, XstreamSerialiser } from './serialiser';
 export { decodeSurrogateKey, getDefaultSurrogateKeyFields, surrogateKeyToFields } from './loader';
 export { setMockStringPrefix } from './mock';

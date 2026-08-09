@@ -462,6 +462,14 @@ class RecordHydrator<TClasses extends RecordClassMap = RecordClassMap> {
       return targetClass ? this.hydrate(targetClass, value) : value;
     };
   }
+
+  adopt(record: BaseRecord): void {
+    const runtime = runtimeOf(record);
+    const identity = recordIdentity(runtime.table, runtime.data as Document);
+    if (identity) this.identityMap.set(identity, record);
+    runtime.state.selected = true;
+    this.attach(record);
+  }
 }
 
 export class QuerySet<TClass extends RecordClass> {
@@ -659,6 +667,14 @@ export class Manager<TClass extends RecordClass> {
   async create(data: CreateOf<TClass>): Promise<InstanceOf<TClass>> {
     const record = this.build(data);
     await record.save();
+    const runtime = runtimeOf(record);
+    const complete = this.table.model.fields
+      .filter(field => field instanceof SimpleField)
+      .every(field => runtime.data[field.name] !== undefined);
+    if (complete) {
+      this.hydrator.adopt(record);
+      return record;
+    }
     const row = await this.table.get<Document>(runtimeOf(record).filter());
     return this.hydrator.hydrate(this.record, row);
   }
@@ -821,7 +837,9 @@ function columnFromField(
     return {
       ...targetColumn,
       name: columnName(name, definition),
-      nullable: definition.options.nullable,
+      // A field is NOT NULL unless it opts in, the opposite of SQL's default,
+      // so record schemas must state nullability rather than leave it absent.
+      nullable: definition.options.nullable === true,
       autoIncrement: false,
       default: literalDefault(definition.options.default),
     };
@@ -831,7 +849,7 @@ function columnFromField(
   const column: Column = {
     name: columnName(name, definition),
     type: columnType(definition),
-    nullable: options.nullable,
+    nullable: options.nullable === true,
     autoIncrement: options.generated,
     default: literalDefault(options.default),
   };

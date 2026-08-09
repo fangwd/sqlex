@@ -82,7 +82,7 @@ export function pluck<T extends { [key: string]: any }>(from: T, keys: (keyof T)
 }
 
 export function deepCopy(data: any) {
-  return JSON.parse(JSON.stringify(data));
+  return cloneValue(data, new WeakMap());
 }
 
 export function isPlainObject(obj: any): boolean {
@@ -120,7 +120,52 @@ export function timeToString(value: string | Date, utc = false) {
 }
 
 export function clone(plainObject: any) {
-  return JSON.parse(JSON.stringify(plainObject));
+  return cloneValue(plainObject, new WeakMap());
+}
+
+function cloneValue<T>(value: T, seen: WeakMap<object, unknown>): T {
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return new Date(value.getTime()) as T;
+  if (Buffer.isBuffer(value)) return Buffer.from(value) as T;
+  if (value instanceof DataView) {
+    const buffer = value.buffer.slice(
+      value.byteOffset,
+      value.byteOffset + value.byteLength
+    );
+    return new DataView(buffer) as T;
+  }
+  if (ArrayBuffer.isView(value)) {
+    const copy = new (value.constructor as any)(value as any);
+    return copy as T;
+  }
+  if (value instanceof ArrayBuffer) return value.slice(0) as T;
+  if (seen.has(value)) return seen.get(value) as T;
+
+  if (value instanceof Map) {
+    const result = new Map();
+    seen.set(value, result);
+    for (const [key, entry] of value) {
+      result.set(cloneValue(key, seen), cloneValue(entry, seen));
+    }
+    return result as T;
+  }
+  if (value instanceof Set) {
+    const result = new Set();
+    seen.set(value, result);
+    for (const entry of value) result.add(cloneValue(entry, seen));
+    return result as T;
+  }
+
+  const result: any = Array.isArray(value)
+    ? []
+    : Object.create(Object.getPrototypeOf(value));
+  seen.set(value, result);
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if ('value' in descriptor) descriptor.value = cloneValue(descriptor.value, seen);
+    Object.defineProperty(result, key, descriptor);
+  }
+  return result;
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

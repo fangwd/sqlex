@@ -60,7 +60,7 @@ import { createNode, moveSubtree, deleteSubtree, treeQuery } from './tree';
 import { selectTree, selectTree2, FieldOptions } from './select';
 import { JsonSerialiser } from './serialiser';
 import { ViewModel, ViewOptions } from './view';
-import { isPlainObject, pluck } from './utils';
+import { deepCopy, isPlainObject, pluck, sleep } from './utils';
 import { mock, cleanup } from './mock';
 import sprintf, { ArgType } from './sprintf';
 
@@ -138,7 +138,12 @@ export class Database<TTables = any> {
   }
 
   clone(): Database<TTables> {
-    return new Database<TTables>(this.pool, this.schema);
+    return new Database<TTables>(
+      this.pool,
+      this.schema,
+      this.operatorMap,
+      this.jsonFilterOptions
+    );
   }
 
   useSchema(schema: Schema): this {
@@ -228,13 +233,25 @@ export class Database<TTables = any> {
     }, 0);
   }
 
-  flush(flushOptions?: FlushOptions) {
-    return this.pool.getConnection().then((connection) =>
-      flushDatabase(connection, this, flushOptions).then((complete) => {
-        connection.release();
-        return { connection, complete };
-      })
-    );
+  async flush(flushOptions?: FlushOptions) {
+    const connection = await this.pool.getConnection();
+    try {
+      const complete = await flushDatabase(connection, this, flushOptions);
+      return { connection, complete };
+    } finally {
+      await connection.release();
+    }
+  }
+
+  async transaction<T>(
+    callback: (connection: Connection) => Promise<T>
+  ): Promise<T> {
+    const connection = await this.pool.getConnection();
+    try {
+      return await connection.transaction(callback);
+    } finally {
+      await connection.release();
+    }
   }
 
   end(): Promise<void> {
@@ -272,7 +289,12 @@ export class Database<TTables = any> {
     if (typeof options.from === 'string') {
       const table = this.table(options.from);
       if (table) {
-        return table.select<T>(options.fields, pluck(options, SelectOptionKeys));
+        return table.select<T>(
+          options.fields,
+          pluck(options, SelectOptionKeys),
+          undefined,
+          connection
+        );
       }
       options = { ...options, from: { table: options.from } };
     }
@@ -290,9 +312,11 @@ export class Database<TTables = any> {
     }
     if (!connection) {
       connection = await this.pool.getConnection();
-      const result = await connection._query(query);
-      connection.release();
-      return result;
+      try {
+        return await connection._query(query);
+      } finally {
+        await connection.release();
+      }
     }
     return connection._query(query);
   }
@@ -382,24 +406,24 @@ export class Table<TSpec = any> {
     return this.model.getForeignKeyOf(model || this.model)!;
   }
 
-  getAncestors(row: Value | Document, filter?: TableFilter<TSpec> | Filter): Promise<Document[]> {
+  async getAncestors(row: Value | Document, filter?: TableFilter<TSpec> | Filter): Promise<Document[]> {
     const field = this.closureTable!.ancestor;
-    return this.db.pool.getConnection().then(connection =>
-      treeQuery(connection, this, row, field, filter as Filter).then(result => {
-        connection.release();
-        return result;
-      })
-    );
+    const connection = await this.db.pool.getConnection();
+    try {
+      return await treeQuery(connection, this, row, field, filter as Filter);
+    } finally {
+      await connection.release();
+    }
   }
 
-  getDescendants(row: Value | Document, filter?: TableFilter<TSpec> | Filter): Promise<Document[]> {
+  async getDescendants(row: Value | Document, filter?: TableFilter<TSpec> | Filter): Promise<Document[]> {
     const field = this.closureTable!.descendant;
-    return this.db.pool.getConnection().then(connection =>
-      treeQuery(connection, this, row, field, filter as Filter).then(result => {
-        connection.release();
-        return result;
-      })
-    );
+    const connection = await this.db.pool.getConnection();
+    try {
+      return await treeQuery(connection, this, row, field, filter as Filter);
+    } finally {
+      await connection.release();
+    }
   }
 
   async select<T extends object = TableRow<TSpec>>(
@@ -544,7 +568,7 @@ export class Table<TSpec = any> {
               const value = table.model.keyValue(row[field.name] as Document);
               const doc = docs.find(doc => table.model.keyValue(doc) === value);
               if (doc) {
-                row[field.name] = JSON.parse(JSON.stringify(doc));
+                row[field.name] = deepCopy(doc);
               }
             }
           } else if (field instanceof RelatedField) {
@@ -621,18 +645,18 @@ export class Table<TSpec = any> {
     return await connection.transaction(() => this._delete(connection, filter));
   }
 
-  replace(data: Document): Promise<DynamicRecord> {
-    return this.db.pool.getConnection().then(connection =>
-      connection.transaction(() =>
-        replaceRecord(connection, this, data).then(record => {
-          connection.release();
-          return record;
-        })
-      )
-    );
+  async replace(data: Document): Promise<DynamicRecord> {
+    const connection = await this.db.pool.getConnection();
+    try {
+      return await connection.transaction(() =>
+        replaceRecord(connection, this, data)
+      );
+    } finally {
+      await connection.release();
+    }
   }
 
-  count(filter?: Filter, expr?: string): Promise<number> {
+  async count(filter?: Filter, expr?: string): Promise<number> {
     let sql;
 
     if (expr) {
@@ -648,12 +672,13 @@ export class Table<TSpec = any> {
       }
     }
 
-    return this.db.pool.getConnection().then(connection =>
-      connection._query(sql).then(rows => {
-        connection.release();
-        return parseInt(rows[0].result);
-      })
-    );
+    const connection = await this.db.pool.getConnection();
+    try {
+      const rows = await connection._query(sql);
+      return parseInt(rows[0].result);
+    } finally {
+      await connection.release();
+    }
   }
 
   async existing(data: Document): Promise<Array<{ row: Document, constraint: Constraint }>> {
@@ -1421,48 +1446,41 @@ export class Table<TSpec = any> {
     });
   }
 
-  claim(filter: Filter, data: Document, orderBy?: string[]): Promise<Document> {
-    const self = this;
+  async claim(
+    filter: Filter,
+    data: Document,
+    orderBy?: string[]
+  ): Promise<Document | null> {
     const MAX_TRY = 5;
-    let try_count = 0;
+    let lastError: unknown;
 
-    return new Promise(resolve => {
-      function _select() {
-        self.select<Document>('*', { where: filter, limit: 10, orderBy }).then(rows => {
-          if (rows.length === 0) {
-            resolve(null as unknown as Document);
-          } else {
-            const row = rows[Math.floor(Math.random() * rows.length)];
-            _update(row);
-          }
-        });
+    for (let attempt = 0; attempt <= MAX_TRY; attempt++) {
+      const rows = await this.select<Document>(
+        '*',
+        { where: filter, limit: 10, orderBy }
+      );
+      if (rows.length === 0) return null;
+
+      const row = rows[Math.floor(Math.random() * rows.length)];
+      const where = { ...filter, ...getUniqueFields(this.model, row) };
+      try {
+        const result = await this.update(
+          data as TableUpdate<TSpec>,
+          where as TableFilter<TSpec>
+        );
+        if ((result.affectedRowCount || result.affectedRows) === 1) {
+          return row;
+        }
+        lastError = Error('Too busy');
+      } catch (error) {
+        // Includes transient errors such as SQLITE_BUSY.
+        lastError = error;
       }
 
-      function _update(row: Document) {
-        const where = { ...filter, ...getUniqueFields(self.model, row) };
-        self
-          .update(data as TableUpdate<TSpec>, where as TableFilter<TSpec>)
-          .then(result => {
-            if ((result.affectedRowCount || result.affectedRows) === 1) {
-              resolve(row);
-            } else if (try_count++ < MAX_TRY) {
-              setTimeout(_select, Math.random() * 1000);
-            } else {
-              throw Error('Too busy');
-            }
-          })
-          .catch(error => {
-            // Error: SQLITE_BUSY: database is locked
-            if (try_count++ < MAX_TRY) {
-              setTimeout(_select, Math.random() * 1000);
-            } else {
-              throw error;
-            }
-          });
-      }
+      if (attempt < MAX_TRY) await sleep(Math.random() * 1000);
+    }
 
-      _select();
-    });
+    throw lastError;
   }
 
   append(data?: { [key: string]: any } | any[]): DynamicRecord {
@@ -1526,9 +1544,6 @@ export class Table<TSpec = any> {
         const record = this.recordMap[uc.name()][value];
         if (record) {
           if (existing && existing !== record) {
-            console.error("Key:", uc.name(), value)
-            console.error("Record A:", runtimeOf(existing).data);
-            console.error("Record B:", runtimeOf(record).data);
             throw Error(`Inconsistent unique constraint values in table ${this.name}`);
           }
           existing = record;
@@ -1793,9 +1808,18 @@ export function _toCamel(value: Value | any, field: SimpleField): Value | any {
     return value;
   }
 
-  if (/date|time/i.test(field.column.type)) {
-    // MUST BE IN ISO 8601 FORMAT!
-    return new Date(value as string).toISOString();
+  if (/^time$/i.test(field.column.type)) {
+    return value instanceof Date
+      ? value.toISOString().slice(11, 23)
+      : String(value);
+  }
+
+  if (/date|timestamp/i.test(field.column.type)) {
+    const date = value instanceof Date ? value : new Date(value as string);
+    // Validate eagerly, preserving the long-standing RangeError message used
+    // by callers to identify malformed temporal input.
+    date.toISOString();
+    return date;
   }
 
   if (/int|long/i.test(field.column.type)) {

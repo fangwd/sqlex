@@ -37,122 +37,11 @@ export function printSchema(
         }
       }
       let flag = '';
-      if (field instanceof SimpleField && !field.column.nullable) {
+      if (field instanceof SimpleField && isNullable(field)) {
         flag = '?';
       }
       lines.push(`${field.name}${flag}: ${typeName};`);
     }
-    lines.push(`}`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
-}
-
-export function printSchemaTypeScript(
-  schema: Schema | SchemaInfo,
-  base: string = 'Model',
-  column: string = 'Column'
-): string {
-  if (!(schema instanceof Schema)) {
-    schema = new Schema(schema);
-  }
-
-  const lines = [
-    `import {Filter, Value, ForeignKeyField} from 'sqlit'`,
-    `import {${base}, ${column}, db} from './${base.toLowerCase()}'`,
-    ''
-  ];
-
-  for (const model of schema.models) {
-    lines.push(`export class ${model.name} extends ${base}`);
-    lines.push(`{`);
-
-    const table = model.table;
-
-    for (const field of model.fields) {
-      lines.push('');
-      let typeName;
-      if (field instanceof ForeignKeyField) {
-        lines.push(`@${column}()`);
-        typeName = field.referencedField.model.name;
-      } else if (field instanceof SimpleField) {
-        lines.push(`@${column}()`);
-        typeName = getTypeName(field.config.userType || field.column.type);
-      } else {
-        const relatedField = field as RelatedField;
-        typeName = relatedField.throughField
-          ? relatedField.throughField.referencedField.model.name
-          : relatedField.referencingField.model.name;
-        if (!relatedField.referencingField.isUnique()) {
-          typeName += '[]';
-        }
-      }
-      lines.push(`${field.name}!: ${typeName};`);
-    }
-
-    lines.push('');
-    lines.push(`constructor(data?: Partial<${model.name}>)`);
-    lines.push('{');
-    lines.push(`super(db.table('${table.name}'), data);`);
-    lines.push('}');
-
-    lines.push('');
-
-    const type = `Promise<${model.name} | null>`;
-
-    lines.push(`static async get(key: Value | Filter):${type} {
-      const row = await db.table('${table.name}').get(key);
-      return row ? new ${model.name}(row) : null;
-    }`);
-
-    lines.push('');
-
-    lines.push(`
-    __set(data: { [key: string]: any }) {
-      for (const name in data) {
-        const value = data[name];
-        if (value === null || value === undefined) {
-          this._set(name, null);
-          continue;
-        }
-        switch(name) {
-    `);
-
-    for (const field of model.fields) {
-      if (field instanceof ForeignKeyField) {
-        lines.push(`case '${field.name}':
-          this.${field.name} = new ${field.referencedField.model.name}(value);
-          break;
-        `);
-      }
-    }
-
-    lines.push(`default:
-          this._set(name, value);
-          break;
-        }
-      }
-    }`);
-
-    for (const field of model.fields) {
-      if (field instanceof ForeignKeyField) {
-        lines.push('');
-        const name = field.name.charAt(0).toUpperCase() + field.name.slice(1);
-        const type = field.referencedField.model.name;
-        const promise = `Promise<${type}|null>`;
-        lines.push(`async get${name}():${promise} {
-          const field = this.table.model.field('${field.name}');
-          const row = await super.get(field as ForeignKeyField);
-          if (row) {
-            this.${field.name} =  new ${type}(row);
-            return this.${field.name};
-          }
-          return null;
-        }`);
-      }
-    }
-
     lines.push(`}`);
     lines.push('');
   }
@@ -489,14 +378,14 @@ function writeModelJava(model: Model, options: ExportOptions) {
     if (!(o instanceof ${model.name})) {
       return false;
     }
-    return ((${model.name})o).${pk} == ${pk};
+    return Objects.equals(((${model.name})o).${pk}, ${pk});
   }
   `);
 
   lines.push(`
   @Override
   public int hashCode() {
-    return Objects.hash(this.getId());
+    return Objects.hash(this.${pk});
   }
   `);
 

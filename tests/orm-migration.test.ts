@@ -163,7 +163,10 @@ test('generated migration and typed records work together', async () => {
     title: 'Ship ORM',
     done: false,
   }));
-  expect(JSON.parse(JSON.stringify(task))).toEqual(task.toJSON());
+  expect(task.createdAt).toBeInstanceOf(Date);
+  expect(JSON.parse(JSON.stringify(task))).toEqual(
+    JSON.parse(JSON.stringify(task.toJSON()))
+  );
 
   expect(inspect(task)).toContain('Ship ORM');
 

@@ -51,18 +51,19 @@ driver selected with `driver`).
 
 For MySQL and PostgreSQL, `connectionLimit` sizes the pool. For PostgreSQL this
 is mapped to `pg`'s `max` option; passing `max` directly also works. Reads and writes
-acquire a pooled connection and release it automatically. When you need several
-queries on one connection (e.g. inside a transaction, or to count queries), grab
-one yourself and release it when done:
+acquire a pooled connection and release it automatically. Use `db.transaction`
+when several operations must commit or roll back together; the connection is
+always released:
 
 ```js
-const connection = await db.pool.getConnection();
-try {
+await db.transaction(async connection => {
   await db.table('user').select('*', {}, undefined, connection);
-} finally {
-  connection.release();
-}
+  await connection.query('update user set status = ? where id = ?', 1, 7);
+});
 ```
+
+For non-transactional work that specifically needs one connection (for example,
+to inspect its query counter), acquire it directly and release it in `finally`.
 
 Call `db.end()` to drain the pool when your process is shutting down.
 

@@ -5,6 +5,8 @@ import {
   toCamelCase,
   toPascalCase,
   config,
+  clone,
+  deepCopy,
   datetimeToString,
   dateToString,
   timeToString
@@ -19,6 +21,20 @@ test('pluralise', () => {
   expect(pluralise('equipmentChild')).toBe('equipmentChildren');
   expect(pluralise('class')).toBe('classes');
   expect(pluralise('property')).toBe('properties');
+});
+
+test.each([clone, deepCopy])('copies dates without converting them to strings', copy => {
+  const source = {
+    createdAt: new Date('2024-01-02T03:04:05.000Z'),
+    nested: [{ value: 1 }],
+  };
+  const result = copy(source);
+
+  expect(result).not.toBe(source);
+  expect(result.createdAt).toBeInstanceOf(Date);
+  expect(result.createdAt).not.toBe(source.createdAt);
+  expect(result.createdAt.getTime()).toBe(source.createdAt.getTime());
+  expect(result.nested).not.toBe(source.nested);
 });
 
 test('customise plural forms', () => {

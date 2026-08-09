@@ -146,7 +146,7 @@ export class Record {
     const runtime = runtimeOf(this);
     if (!runtime.isDirty()) return this;
     await using connection = await runtime.table.db.pool.getConnection();
-    return await connection.transaction(() => flushRecord(connection, this));
+    return await connection.transaction(() => flushRecord(connection, this)) as this;
   }
 
   update(data: Row = {}): Promise<this> {
@@ -330,7 +330,10 @@ export class RecordRuntime {
       const value = this.value(field.name);
       if (value === undefined) return undefined;
       if (value === null) return null;
-      values.push(_toCamel(value, field) + '');
+      const camel = _toCamel(value, field);
+      // Date#toString() is local and second-precision, which would merge
+      // distinct records sharing a datetime unique key.
+      values.push(camel instanceof Date ? camel.toISOString() : camel + '');
     }
     return JSON.stringify(values).toLocaleLowerCase();
   }

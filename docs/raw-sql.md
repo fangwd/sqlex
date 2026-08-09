@@ -53,10 +53,7 @@ The same `query` method exists on a connection, so you can run raw SQL alongside
 builder calls on a shared connection (for example within a transaction):
 
 ```js
-const connection = await db.pool.getConnection();
-try {
+await db.transaction(async connection => {
   await connection.query('update user set status = 0 where id = ?', id);
-} finally {
-  connection.release();
-}
+});
 ```

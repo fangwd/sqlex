@@ -121,6 +121,9 @@ within a transaction or to count queries in a test):
 
 ```js
 const connection = await db.pool.getConnection();
-const rows = await db.table('user_group').select('*', { where: { group: [] } }, undefined, connection);
-connection.release();
+try {
+  const rows = await db.table('user_group').select('*', { where: { group: [] } }, undefined, connection);
+} finally {
+  connection.release();
+}
 ```

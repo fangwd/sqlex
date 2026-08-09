@@ -47,6 +47,21 @@ describe('_toCamel json columns', () => {
   });
 });
 
+describe('_toCamel temporal columns', () => {
+  test.each(['date', 'datetime', 'timestamp', 'timestamptz'])(
+    'returns %s values as Date objects',
+    type => {
+      const value = _toCamel('2024-01-02T03:04:05.000Z', mockField(type));
+      expect(value).toBeInstanceOf(Date);
+      expect(value.toISOString()).toBe('2024-01-02T03:04:05.000Z');
+    }
+  );
+
+  test('keeps time values as strings', () => {
+    expect(_toCamel('03:04:05', mockField('time'))).toBe('03:04:05');
+  });
+});
+
 describe('escapeValue json columns', () => {
   test('encodes object as a JSON literal', () => {
     expect(escapeJson('json', { a: 1, b: 'x' })).toBe(`'${JSON.stringify({ a: 1, b: 'x' })}'`);

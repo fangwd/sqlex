@@ -26,9 +26,13 @@ export class QueryCounter {
   total: number = 0;
 }
 
-export type TransactionCallback = (
+/**
+ * Return a promise to have the transaction committed when it settles, or
+ * nothing to commit or roll back through the connection yourself.
+ */
+export type TransactionCallback<T = void> = (
   connection: Connection
-) => Promise<any> | void;
+) => Promise<T> | void;
 
 export interface DialectEncoder {
   dialect: Dialect;
@@ -74,12 +78,14 @@ export abstract class Connection implements DialectEncoder {
   abstract escapeId(name: string): string;
   abstract escapeDate(date: Date): string;
 
-  async transaction(callback: TransactionCallback) {
+  transaction<T>(callback: (connection: Connection) => Promise<T>): Promise<T>;
+  transaction(callback: (connection: Connection) => void): Promise<void>;
+  async transaction<T>(callback: TransactionCallback<T>): Promise<T | undefined> {
     await this.beginTransaction();
     try {
-      const promise = callback(this);
-      if (promise instanceof Promise) {
-        const result = await promise;
+      const pending = callback(this);
+      if (pending) {
+        const result = await pending;
         await this.commit();
         return result;
       }

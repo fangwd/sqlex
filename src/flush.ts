@@ -581,7 +581,7 @@ export function dumpDirtyRecords(db: Database, all: boolean = false) {
 }
 
 function makeMapTable(table: Table) {
-  return new Database(table.db.pool, table.db.schema).table(table.model);
+  return table.db.clone().table(table.model);
 }
 
 /**

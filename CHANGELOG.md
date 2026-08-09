@@ -2,6 +2,53 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.2.3]
+
+### Added
+
+- `db.transaction(callback)` runs the callback on a pooled connection inside a
+  transaction, committing when it resolves and rolling back when it rejects.
+  The connection is released either way. Pass it to the query builders that
+  take one (`table.select(fields, options, undefined, connection)`) to keep
+  several statements on the same transaction.
+
+### Changed
+
+- **Breaking.** `date`, `datetime`, and `timestamp` columns are read back as
+  `Date` objects rather than ISO 8601 strings, matching the types that
+  `field.date` and `field.datetime` already declared. `JSON.stringify` still
+  produces an ISO string, but code comparing a column to a string, or relying
+  on `toJSON()` returning one, needs updating. SQL `time` columns are read back
+  as strings, which previously threw a `RangeError`.
+- **Breaking.** `printSchemaTypeScript` is gone. It generated classes against a
+  decorator API that no longer exists, so its output has not compiled since
+  v4.0.0. Use `printSchemaTypeMap`, which emits the typed `Database` table map.
+- Record definitions now state column nullability explicitly instead of leaving
+  it absent, so generated types distinguish a field that omitted `nullable`
+  (NOT NULL, the record default) from a genuinely nullable column. Row types for
+  record-defined schemas lose spurious `| null`, and `Create` types lose the
+  matching spurious `?`.
+
+### Fixed
+
+- `printSchema` had its optional marker inverted, marking NOT NULL fields `?`
+  and leaving nullable ones required.
+- A failing query leaked its pooled connection in `db.flush`, `db.select`,
+  `table.count`, `table.replace`, `table.getAncestors`, and
+  `table.getDescendants`. Each now releases in a `finally`.
+- `table.claim()` never settled once it exhausted its retries — it threw inside
+  a `then` callback, which rejected an inner promise nobody awaited. It now
+  rejects with the last error, and its return type admits the `null` it has
+  always returned when nothing matches.
+- `db.clone()` dropped the custom operator map and JSON filter options, so the
+  clones made internally by `copyRecord` and flush's map tables silently lost
+  that configuration.
+- `deepCopy`/`clone` round-tripped through JSON, which turned `Date` values into
+  strings, corrupted `Buffer` and typed-array values, dropped `undefined`
+  properties, and threw on cyclic input.
+- The Java export compared primary keys with `==` and hashed a `getId()` accessor
+  that does not exist unless the key is named `id`.
+
 ## [4.2.2]
 
 ### Added

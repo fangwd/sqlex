@@ -2,6 +2,7 @@ import { Database, Table, Filter } from './database';
 import { Model, ForeignKeyField, SimpleField } from './schema';
 import { runtimeOf, type DynamicRecord as Record } from './record';
 import { Document } from './types';
+import { deepCopy } from './utils';
 
 export interface CopyOptions {
   filter?: { [key: string]: string | null };
@@ -14,7 +15,7 @@ export function copyRecord(
 ): Promise<Record> {
   const table = runtimeOf(record).table;
   const filterMap = buildTableFilters(record, options, true);
-  const db = new Database(table.db.pool, table.db.schema);
+  const db = table.db.clone();
   return selectRows(filterMap, db).then(() => {
     const model = table.model;
     const record = db.table(model).recordList[0];
@@ -72,10 +73,10 @@ function buildTableFilters(
         const throughField = related.throughField!;
         const table = db.table(throughField.referencedField);
 
-        let value: Filter = JSON.parse(JSON.stringify(filter));
+        let value: Filter = deepCopy(filter);
 
         if (!throughField.relatedField!.throughField) {
-          value = { [field.name]: JSON.parse(JSON.stringify(filter)) };
+          value = { [field.name]: deepCopy(filter) };
         }
 
         const name = throughField.relatedField!.name;

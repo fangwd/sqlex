@@ -68,6 +68,12 @@ stamps, expiries, audit trails — and leave it off for wall-clock values that
 belong to no particular zone, such as an opening time. MySQL and SQLite have one
 timestamp type each, so the option only changes the PostgreSQL column type.
 
+Date, datetime, and timestamp columns are returned as JavaScript `Date` objects;
+SQL `time` columns remain strings. `Date#toJSON()` and `Date#toISOString()` use
+UTC. For timestamp columns without timezone information, keep the application,
+driver, and database session on the same timezone (UTC is recommended), because
+the stored value itself does not identify an offset.
+
 Be aware that `baseline` normalises every `timestamp*` column to a single type,
 so it will not report a plain column where an offset-aware one was declared.
 

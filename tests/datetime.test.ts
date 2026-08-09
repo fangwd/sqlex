@@ -1,3 +1,5 @@
+import { runtimeOf } from '../src/record';
+import { Schema } from '../src/schema';
 import * as helper from './helper';
 
 const NAME = 'datetime';
@@ -28,4 +30,32 @@ describe('datetime', () => {
     db.end();
   });
 
+  test('unique keys distinguish datetimes within the same second', async () => {
+    const schema = new Schema({
+      name: NAME,
+      tables: [{
+        name: 'reading',
+        columns: [
+          { name: 'id', type: 'integer', autoIncrement: true, nullable: false },
+          { name: 'taken_at', type: 'datetime', nullable: false },
+        ],
+        constraints: [
+          { primaryKey: true, columns: ['id'] },
+          { unique: true, columns: ['taken_at'] },
+        ],
+      }],
+    });
+    const db = helper.connectToDatabase(NAME, schema);
+    const table = db.table('reading');
+    const early = table.append({ takenAt: new Date('2024-01-02T03:04:05.100Z') });
+    const late = table.append({ takenAt: new Date('2024-01-02T03:04:05.900Z') });
+
+    expect(late).not.toBe(early);
+
+    const key = table.model.uniqueKeys.find(uniqueKey => !uniqueKey.primary)!;
+    expect(runtimeOf(early).uniqueValue(key)).toBe('["2024-01-02t03:04:05.100z"]');
+    expect(runtimeOf(late).uniqueValue(key)).toBe('["2024-01-02t03:04:05.900z"]');
+
+    await db.end();
+  });
 });

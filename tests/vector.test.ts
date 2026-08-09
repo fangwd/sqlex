@@ -90,7 +90,7 @@ describe('vector field definition', () => {
       name: 'embedding',
       type: 'vector',
       dimensions: 3,
-      nullable: undefined,
+      nullable: false,
     }));
   });
 
@@ -125,8 +125,10 @@ describe('vector schema output', () => {
   const schema = schemaFromRecords({ VectorItem });
 
   test('prints vector fields as numeric arrays', () => {
-    expect(printSchema(schema)).toMatch(/embedding\?: number\[\];/);
-    expect(printSchemaTypeMap(schema)).toMatch(/embedding: number\[\] \| null;/);
+    expect(printSchema(schema)).toMatch(/embedding: number\[\];/);
+    expect(printSchema(schema)).toMatch(/optionalEmbedding\?: number\[\];/);
+    expect(printSchemaTypeMap(schema)).toMatch(/embedding: number\[\];/);
+    expect(printSchemaTypeMap(schema)).toMatch(/optionalEmbedding: number\[\] \| null;/);
   });
 
   test('exports vector fields to Java arrays', () => {
