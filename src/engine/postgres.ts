@@ -216,6 +216,7 @@ class SchemaBuilder {
 
   async getResult(): Promise<SchemaInfo> {
     const tableColumnsMap = await this.getColumns();
+    const tableComments = await this.getTableComments();
     const tableConstraintMap = await this.getTableConstraints();
     const columnUsageMap = await this.getKeyColumnUsage();
     const foreignKeyMap = await this.getForeignKeyMap();
@@ -231,6 +232,7 @@ class SchemaBuilder {
         columns: tableColumnsMap[tableName],
         constraints: [],
       };
+      if (tableComments[tableName]) tableInfo.comment = tableComments[tableName];
 
       for (const constraintName in tableConstraintMap[tableName]) {
         const type = tableConstraintMap[tableName][constraintName];
@@ -281,6 +283,21 @@ class SchemaBuilder {
     return map;
   }
 
+  async getTableComments(): Promise<{ [key: string]: string }> {
+    const rows = await query<{ table_name: string; comment: string | null }>(this.connection, `
+      select c.relname as table_name,
+             pg_catalog.obj_description(c.oid, 'pg_class') as comment
+      from pg_catalog.pg_class c
+      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = ${this.escapedSchemaName} and c.relkind = 'r'
+    `);
+    const map: { [key: string]: string } = {};
+    for (const row of rows) {
+      if (row.comment) map[row.table_name] = row.comment;
+    }
+    return map;
+  }
+
   async getColumns(): Promise<{ [key: string]: ColumnInfo[] }> {
     const enumMap = await this.getEnumMap();
     const tableMap = await this.getTableMap();
@@ -296,6 +313,7 @@ class SchemaBuilder {
       numeric_scale: number | null;
       udt_name: string;
       vector_dimensions: number | null;
+      column_comment: string | null;
     }>(this.connection, `
       select table_name, column_name, ordinal_position, column_default,
       is_nullable, data_type, character_maximum_length, numeric_precision,
@@ -308,7 +326,16 @@ class SchemaBuilder {
         where c.relname = information_schema.columns.table_name
           and n.nspname = information_schema.columns.table_schema
           and a.attname = information_schema.columns.column_name
-      ) end as vector_dimensions
+      ) end as vector_dimensions,
+      (
+        select pg_catalog.col_description(a.attrelid, a.attnum)
+        from pg_catalog.pg_attribute a
+        join pg_catalog.pg_class c on c.oid = a.attrelid
+        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        where c.relname = information_schema.columns.table_name
+          and n.nspname = information_schema.columns.table_schema
+          and a.attname = information_schema.columns.column_name
+      ) as column_comment
       from information_schema.columns
       where table_catalog = ${this.escapedCatalogName} and table_schema = ${this.escapedSchemaName};
     `);
@@ -365,6 +392,9 @@ class SchemaBuilder {
       }
       if (row.column_default !== null) {
         columnInfo.default = row.column_default;
+      }
+      if (row.column_comment) {
+        columnInfo.comment = row.column_comment;
       }
       map[row.table_name].push([row.ordinal_position, columnInfo]);
     }

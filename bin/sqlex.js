@@ -2,10 +2,15 @@
 
 const [command, ...args] = process.argv.slice(2);
 
-if (command !== 'migration') {
-  fail('Usage: sqlex migration <make|sql|up|down|status|baseline>');
-} else {
+if (command === 'migration') {
   require('./sqlex-migrate').main(args).catch(fail);
+} else if (command === 'openapi') {
+  require('./sqlex-openapi').main(args).catch(fail);
+} else {
+  fail(
+    'Usage: sqlex migration <make|sql|up|down|status|baseline>\n' +
+    '       sqlex openapi [--config <file>] [--out <file>]'
+  );
 }
 
 function fail(error) {

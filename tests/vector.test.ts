@@ -4,16 +4,12 @@ import {
   MigrationRunner,
   defineRecord,
   encodeFilter,
-  exportSchemaJava,
   field,
   makeMigration,
   printSchema,
   printSchemaTypeMap,
   schemaFromRecords,
 } from '../src';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { _toCamel, Table } from '../src/database';
 import type { Dialect, DialectEncoder } from '../src/engine';
 import { isValue, SimpleField } from '../src/schema';
@@ -129,18 +125,6 @@ describe('vector schema output', () => {
     expect(printSchema(schema)).toMatch(/optionalEmbedding\?: number\[\];/);
     expect(printSchemaTypeMap(schema)).toMatch(/embedding: number\[\];/);
     expect(printSchemaTypeMap(schema)).toMatch(/optionalEmbedding: number\[\] \| null;/);
-  });
-
-  test('exports vector fields to Java arrays', () => {
-    const path = mkdtempSync(join(tmpdir(), 'sqlex-vector-java-'));
-    try {
-      exportSchemaJava(schema, { path });
-      const java = readFileSync(join(path, 'VectorItem.java'), 'utf8');
-      expect(java).toContain('private double[] embedding');
-      expect(java).toContain('public double[] getEmbedding()');
-    } finally {
-      rmSync(path, { recursive: true, force: true });
-    }
   });
 });
 

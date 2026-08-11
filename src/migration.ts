@@ -49,6 +49,7 @@ export interface MigrationTable {
   constraints: MigrationConstraint[];
   indexes: MigrationIndex[];
   checks?: MigrationCheck[];
+  comment?: string;
 }
 
 export interface MigrationSchema {
@@ -193,12 +194,9 @@ export function migrationSchemaFromRecords(
         const field = fields.find(([fieldName, definition]) =>
           getColumnName(fieldName, definition) === column.name
         )![1];
-        return {
-          ...column,
-          defaultSql: getSqlDefault(field),
-          precision: numberOption(field, 'precision'),
-          scale: numberOption(field, 'scale'),
-        };
+        // precision and scale come from the column itself, which the record
+        // definition already carries.
+        return { ...column, defaultSql: getSqlDefault(field) };
       });
       const constraints = table.constraints.map(constraint => {
         if (!constraint.references) return constraint;
@@ -384,7 +382,7 @@ export class MigrationCompiler {
   compile(operation: MigrationOperation): string[] {
     switch (operation.kind) {
       case 'createTable':
-        return [this.createTable(operation.table)];
+        return this.createTable(operation.table);
       case 'dropTable':
         return [`drop table ${this.id(operation.table)}`];
       case 'addColumn':
@@ -397,7 +395,8 @@ export class MigrationCompiler {
         }
         return [
           `alter table ${this.id(operation.table)} add column ` +
-          this.column(operation.column)
+          this.column(operation.column),
+          ...this.columnComment(operation.table, operation.column),
         ];
       case 'dropColumn':
         return [
@@ -439,7 +438,7 @@ export class MigrationCompiler {
     }
   }
 
-  private createTable(table: MigrationTable): string {
+  private createTable(table: MigrationTable): string[] {
     const singlePrimary = table.constraints.find(
       constraint => constraint.primaryKey && constraint.columns.length === 1
     );
@@ -468,11 +467,35 @@ export class MigrationCompiler {
         `constraint ${this.id(check.name)} check (${check.expression})`
       );
     }
-    return (
-      `create table ${this.id(table.name)} (` +
-      definitions.join(', ') +
-      ')'
-    );
+    let sql =
+      `create table ${this.id(table.name)} (` + definitions.join(', ') + ')';
+    if (this.dialect === 'mysql' && table.comment) {
+      sql += ` comment ${this.encoder.escape(table.comment)}`;
+    }
+
+    // postgres stores comments through their own statements; sqlite has no
+    // comment storage at all, so a comment simply is not emitted there.
+    const statements = [sql];
+    if (this.dialect === 'postgres') {
+      if (table.comment) {
+        statements.push(
+          `comment on table ${this.id(table.name)} is ` +
+            this.encoder.escape(table.comment)
+        );
+      }
+      for (const column of table.columns) {
+        statements.push(...this.columnComment(table.name, column));
+      }
+    }
+    return statements;
+  }
+
+  private columnComment(table: string, column: MigrationColumn): string[] {
+    if (this.dialect !== 'postgres' || !column.comment) return [];
+    return [
+      `comment on column ${this.id(table)}.${this.id(column.name)} is ` +
+        this.encoder.escape(column.comment),
+    ];
   }
 
   private column(column: MigrationColumn, suffix = ''): string {
@@ -504,6 +527,9 @@ export class MigrationCompiler {
         .map(value => this.encoder.escape(value))
         .join(', ');
       sql += ` check (${this.id(column.name)} in (${values}))`;
+    }
+    if (this.dialect === 'mysql' && column.comment) {
+      sql += ` comment ${this.encoder.escape(column.comment)}`;
     }
     return sql + suffix;
   }
@@ -1181,14 +1207,6 @@ function getColumnName(
 ): string {
   return definition.options.column ||
     (definition.kind === 'foreignKey' ? `${name}_id` : name);
-}
-
-function numberOption(
-  field: AnyFieldDefinition,
-  name: 'precision' | 'scale'
-): number | undefined {
-  const value = (field.options as Record<string, unknown>)[name];
-  return typeof value === 'number' ? value : undefined;
 }
 
 function stringOption(

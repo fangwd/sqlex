@@ -110,6 +110,8 @@ relation-aware table operations.
 | Nested relational import/export | [Import and export](./docs/import-export.md) |
 | Trees backed by closure tables | [Hierarchical data](./docs/hierarchical-data.md) |
 | Parameterized SQL with named placeholders | [Raw SQL](./docs/raw-sql.md) |
+| REST API and OpenAPI over an existing database | [REST API](./docs/api.md) |
+| One API serving many tenants | [Multi-tenancy](./docs/multi-tenancy.md) |
 
 ## Features
 
@@ -120,6 +122,7 @@ relation-aware table operations.
 - Schema introspection for existing databases
 - JSON-path filtering and configurable filter operator syntax
 - Closure-table tree traversal and cloning
+- Read-only REST API and OpenAPI 3.1 generation from a declared policy
 - Bulk loading, export, serialization, views, and aggregates
 - Parameterized raw SQL with positional and named placeholders
 
@@ -147,6 +150,8 @@ relation-aware table operations.
 
 **Advanced**
 
+- [REST API](./docs/api.md)
+- [Multi-tenancy](./docs/multi-tenancy.md)
 - [Views and aggregates](./docs/views-and-aggregates.md)
 - [Hierarchical data](./docs/hierarchical-data.md)
 - [Import and export](./docs/import-export.md)

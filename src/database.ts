@@ -588,61 +588,79 @@ export class Table<TSpec = any> {
     return result;
   }
 
-  async get<T extends object = TableRow<TSpec>>(key: Value | TableFilter<TSpec> | Filter): Promise<T> {
-    return this._call('_get', key);
+  async get<T extends object = TableRow<TSpec>>(
+    key: Value | TableFilter<TSpec> | Filter,
+    connection?: Connection
+  ): Promise<T> {
+    return this._call(connection, '_get', key);
   }
 
-  async insert<T = number>(data: TableInsert<TSpec>): Promise<T> {
-    return this._call('_insert', data);
+  async insert<T = number>(data: TableInsert<TSpec>, connection?: Connection): Promise<T> {
+    return this._call(connection, '_insert', data);
   }
 
   async create<T extends object = TableRow<TSpec>>(
     data: TableCreate<TSpec>,
-    options?: MutationOptions<T>
+    options?: MutationOptions<T>,
+    connection?: Connection
   ): Promise<T> {
-    return this._call('_create', data, options);
+    return this._call(connection, '_create', data, options);
   }
 
   async update<T = any>(
     data: TableUpdate<TSpec>,
-    filter?: TableFilter<TSpec>
+    filter?: TableFilter<TSpec>,
+    connection?: Connection
   ): Promise<T> {
-    return this._call('_update', data, filter);
+    return this._call(connection, '_update', data, filter);
   }
 
   upsert<T extends object = TableRow<TSpec>>(
     data: TableCreate<TSpec>,
     update?: TableUpdate<TSpec>,
-    options?: MutationOptions<T>
+    options?: MutationOptions<T>,
+    connection?: Connection
   ): Promise<T> {
-    return this._call('_upsert', data, update, options);
+    return this._call(connection, '_upsert', data, update, options);
   }
 
   modify<T extends object = TableRow<TSpec>>(
     data: TableUpdate<TSpec>,
     filter: TableFilter<TSpec>,
-    options?: MutationOptions<T>
+    options?: MutationOptions<T>,
+    connection?: Connection
   ): Promise<T> {
-    return this._call('_modify', data, filter, options);
+    return this._call(connection, '_modify', data, filter, options);
   }
 
-  private async _call(method: string, ...args: any[]): Promise<any> {
-    const connection = await this.db.pool.getConnection();
+  /**
+   * Runs an internal write. A caller-supplied connection joins that caller's
+   * transaction and stays open for it to release; without one, a pooled
+   * connection is taken and released here.
+   */
+  private async _call(
+    connection: Connection | undefined,
+    method: string,
+    ...args: any[]
+  ): Promise<any> {
+    const own = connection ?? (await this.db.pool.getConnection());
     try {
       const methods = this as unknown as { [key: string]: (...args: never[]) => Promise<unknown> };
       const fn = methods[method];
-      const result = await fn.apply(this, [connection, ...args] as never[]);
-      connection.release();
-      return result;
-    } catch (error) {
-      connection.release();
-      throw error;
+      return await fn.apply(this, [own, ...args] as never[]);
+    } finally {
+      if (!connection) own.release();
     }
   }
 
-  async delete<T extends Document = Document>(filter?: Filter): Promise<T> {
-    await using connection = await this.db.pool.getConnection();
-    return await connection.transaction(() => this._delete(connection, filter));
+  async delete<T extends Document = Document>(
+    filter?: Filter,
+    connection?: Connection
+  ): Promise<T> {
+    // A caller's connection is already inside a transaction of its own.
+    if (connection) return (await this._delete(connection, filter)) as T;
+    await using own = await this.db.pool.getConnection();
+    return await own.transaction(() => this._delete(own, filter));
   }
 
   async replace(data: Document): Promise<DynamicRecord> {

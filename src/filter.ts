@@ -1219,6 +1219,17 @@ function extendFilter(model: Model, filter: Document, fields: Document) {
     if (value && typeof value === 'object') {
       const field = model.field(name);
       if (field instanceof ForeignKeyField) {
+        // A scalar here filters the key itself ({user: 1}). The expansion's
+        // join is recorded through this merge, so the scalar is lifted to the
+        // object form it abbreviates rather than skipped, which would leave
+        // the joined columns unresolved.
+        const existing = filter[name];
+        const key = field.referencedField.name;
+        if (isValue(existing)) {
+          filter[name] = { [key]: existing as Value };
+        } else if (Array.isArray(existing) && existing.every(entry => isValue(entry))) {
+          filter[name] = { [`${key}_in`]: existing as Value[] };
+        }
         if (!filter[name]) {
           filter[name] = {};
         }

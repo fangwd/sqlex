@@ -51,6 +51,28 @@ test('select foreign key fields', async () => {
   db.end();
 });
 
+test('a scalar foreign-key filter composes with expanding the same key', async () => {
+  const db = helper.connectToDatabase(NAME);
+  // The filter addresses the key by value while the field spec expands it two
+  // levels deep; the scalar is lifted so the expansion's joins resolve.
+  const rows = await db.table('order_item').select(
+    { order: { user: '*' } },
+    { where: { order: { user: 3 } } }
+  );
+  expect(rows.length).toBeGreaterThan(0);
+  for (const row of rows as any[]) {
+    expect(row.order.user.id).toBe(3);
+    expect(typeof row.order.user.email).toBe('string');
+  }
+  // The scalar form and its object abbreviation agree.
+  const lifted = await db.table('order_item').select(
+    { order: { user: '*' } },
+    { where: { order: { user: { id: 3 } } } }
+  );
+  expect(lifted.length).toBe(rows.length);
+  await db.end();
+});
+
 test('select related fields of foreign key fields', async () => {
   const db = helper.connectToDatabase(NAME);
   const connection = await db.pool.getConnection();

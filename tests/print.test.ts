@@ -1,8 +1,5 @@
 import { Schema } from '../src/schema';
-import { exportSchemaJava, printSchema, printSchemaTypeMap, getTypeName, DataType } from '../src/print';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { printSchema, printSchemaTypeMap, getTypeName, DataType } from '../src/print';
 import * as helper from './helper';
 import { Database, Table, Column, Constraint } from '../src/types';
 
@@ -79,29 +76,6 @@ test('printSchema marks only nullable scalar fields optional', () => {
   expect(printSchema(schema)).toMatch(/note\?: string;/);
 });
 
-test('exportSchemaJava uses the actual primary-key member', () => {
-  const schema = new Schema({
-    name: 'test',
-    tables: [{
-      name: 'widget',
-      columns: [
-        { name: 'code', type: 'varchar', nullable: false },
-        { name: 'name', type: 'varchar', nullable: false },
-      ],
-      constraints: [{ primaryKey: true, columns: ['code'] }],
-    }],
-  });
-  const path = mkdtempSync(join(tmpdir(), 'sqlex-java-pk-'));
-  try {
-    exportSchemaJava(schema, { path });
-    const java = readFileSync(join(path, 'Widget.java'), 'utf8');
-    expect(java).toContain('Objects.equals(((Widget)o).code, code)');
-    expect(java).toContain('Objects.hash(this.code)');
-    expect(java).not.toContain('getId()');
-  } finally {
-    rmSync(path, { recursive: true, force: true });
-  }
-});
 
 describe('printSchemaTypeMap', () => {
   test('generates table specs for typed Database usage', () => {

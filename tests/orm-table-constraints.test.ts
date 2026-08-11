@@ -99,9 +99,15 @@ test('an unknown field name in an index is rejected', () => {
   expect(() => makeMigration('0001_bad', { Bad })).toThrow('unknown field nope');
 });
 
+// MySQL cannot create the partial index at all, as the test above asserts, so
+// Asset is left out of the migration there and its assertions are skipped.
+const partialIndexSupported = helper.DB_TYPE !== 'mysql';
+
 test('the constraints are enforced by the database', async () => {
   const db = helper.connectToDatabase(NAME) as Database;
-  const { migration, warnings } = makeMigration('0001_items', { Item, Asset });
+  const { migration, warnings } = partialIndexSupported
+    ? makeMigration('0001_items', { Item, Asset })
+    : makeMigration('0001_items', { Item });
   expect(warnings).toEqual([]);
   await new MigrationRunner(db).up([migration]);
 
@@ -131,12 +137,14 @@ test('the constraints are enforced by the database', async () => {
   ).rejects.toThrow();
 
   // The partial unique index constrains only the rows it covers.
-  await models.Asset.create({ code: 'sys' });
-  await expect(models.Asset.create({ code: 'sys' })).rejects.toThrow();
-  // rows with an owner fall outside the predicate and may repeat the code
-  await models.Asset.create({ ownerId: 1, code: 'sys' });
-  await models.Asset.create({ ownerId: 2, code: 'sys' });
-  expect(await models.Asset.filter({ code: 'sys' }).count()).toBe(3);
+  if (partialIndexSupported) {
+    await models.Asset.create({ code: 'sys' });
+    await expect(models.Asset.create({ code: 'sys' })).rejects.toThrow();
+    // rows with an owner fall outside the predicate and may repeat the code
+    await models.Asset.create({ ownerId: 1, code: 'sys' });
+    await models.Asset.create({ ownerId: 2, code: 'sys' });
+    expect(await models.Asset.filter({ code: 'sys' }).count()).toBe(3);
+  }
 
   await db.end();
 });

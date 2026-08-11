@@ -2,6 +2,137 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.5.0]
+
+### Removed
+
+- The Java schema exporter (`exportSchemaJava`, `shouldSkip`) and
+  `XstreamSerialiser`. Neither had documentation or a runtime caller — the Java
+  exporter wrote POJOs well outside sqlex's scope, and the XStream serialiser
+  only appeared in a doc example. `printSchema`, `printSchemaTypeMap` and
+  `JsonSerialiser` are unchanged, as is `getTypeName`, which the mock generator
+  uses.
+
+
+### Added
+
+- `sqlex/api` puts a read-only REST API and an OpenAPI 3.1 document over an
+  existing database, both generated from one declared policy so they cannot
+  disagree. `createApi(db, config)` returns `handle(request, context)`, which is
+  a plain `Request` to `Response` function with no framework and no new
+  dependencies, alongside `openapi()` and the compiled `plan`.
+- Nothing is exposed unless the configuration names it, and `filter`, `sort` and
+  `include` grant nothing by default, so exposing a column does not silently
+  make it a query dimension. A configuration that cannot mean what it says —
+  an unknown model or column, a relation whose target is not exposed, a filter
+  colliding with a reserved parameter — is rejected when it is compiled rather
+  than when a request arrives.
+- `scope` returns a filter ANDed into every read of a resource, including rows
+  reached through `include`. It is combined rather than merged, so a request
+  filter containing `or` cannot widen past it.
+- `sqlex openapi` writes the document to stdout or `--out`, reading the `api`
+  key of the same `sqlex.config.*` file the migration commands use.
+- Writes: `POST` on a collection creates, `PATCH` on an item changes the columns
+  named, `DELETE` removes it. Each is opted into through `operations`, and
+  `write` says which columns a client may set, independently of `read`. A
+  relation is set by its key value: an object would be a nested mutation, which
+  sqlex would carry out, so it is refused before reaching it. Statuses are
+  `201`/`200`/`204`, with `409` for a duplicate, `422` for a refused reference,
+  `415` for a body that is not JSON, and `400` listing every rejected column.
+- A write and the check that follows it share one transaction, so a change that
+  would move a row outside its `scope` is refused and rolled back rather than
+  quietly handing the row to someone else.
+- The write methods on `Table` (`insert`, `create`, `update`, `upsert`,
+  `modify`, `delete`, `get`) now take an optional `connection`, so they can join
+  a transaction the caller opened with `db.transaction` instead of taking a
+  connection of their own.
+- Cursor pagination: a full page's `meta.next` is an opaque cursor naming the
+  next one, immune to concurrent inserts and cheaper than a deep offset. The
+  listing follows the sort plus the primary key as a tiebreaker, so duplicate
+  sort values cannot lose or repeat rows across a page boundary; a cursor is
+  tied to the sort it was minted under and cannot be combined with `offset`.
+- Aggregates: `GET /{path}/aggregate` counts, groups and applies `sum`, `avg`,
+  `min` and `max` over the rows the resource's filters and scope admit, once the
+  `aggregate` operation is exposed and its columns are named.
+- See [REST API](./docs/api.md) and `examples/rest-api`.
+
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
+
+### Fixed
+
+- A keyset cursor encodes the value of every column it orders by, so a sort
+  column excluded from `read` leaked that value through the otherwise-opaque
+  `meta.next`. Such a sort now yields no cursor and pagination falls back to
+  `offset`; sorting by a hidden column is still allowed, only the cursor is
+  withheld. The tiebreaker key is held to the same rule. (`filter`, `sort` and
+  `aggregate` remain deliberately independent of `read` for columns you name
+  explicitly; only the automatic cursor is guarded.)
+
+- A filter addressing a foreign key by a scalar (`{ user: 1 }`) crashed — or,
+  worse, silently mis-resolved the joined columns — when the same select also
+  expanded that key with nested fields. The scalar is now lifted to the object
+  form it abbreviates before the expansion's joins are recorded.
+- `field.decimal({ precision, scale })` now carries both into the schema it
+  derives, alongside the `maxLength`, `dimensions` and enum metadata that were
+  already there. Only the migration compiler read them before, re-deriving them
+  from the field options, so an introspected schema described a decimal column
+  and a record-defined one did not — leaving anything reading a column back
+  unable to tell the declared scale. Generated DDL and migration checksums are
+  unchanged.
+
 ## [4.2.3]
 
 ### Added
@@ -28,6 +159,61 @@ All notable changes to this project are documented in this file.
   (NOT NULL, the record default) from a genuinely nullable column. Row types for
   record-defined schemas lose spurious `| null`, and `Create` types lose the
   matching spurious `?`.
+
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
 
 ### Fixed
 
@@ -63,6 +249,61 @@ All notable changes to this project are documented in this file.
   operators, and is what `jsonb_typeof` requires. MySQL's `json` is already
   binary and SQLite keeps `text`, so only the PostgreSQL column type changes.
 
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
+
 ### Fixed
 
 - Selecting a foreign key on a table with a composite primary key threw. The
@@ -83,6 +324,61 @@ All notable changes to this project are documented in this file.
 - Table-level `unique`, `indexes`, and `checks` on a record definition, for
   composite unique keys, multi-column indexes, partial indexes (`where`, on
   PostgreSQL and SQLite), and named check constraints.
+
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
 
 ### Fixed
 
@@ -112,6 +408,61 @@ All notable changes to this project are documented in this file.
 - Typed reverse relations via `RecordSet<T>` declarations.
 - Records print their data in `console.log`/`util.inspect`.
 - Node.js 24.12 and TypeScript 7 build support.
+
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
 
 ### Fixed
 
@@ -177,6 +528,61 @@ All notable changes to this project are documented in this file.
 
 ## [3.6.2]
 
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
+
 ### Fixed
 
 - **PostgreSQL: `query()` now returns rows for raw `INSERT ... RETURNING`.**
@@ -212,6 +618,61 @@ All notable changes to this project are documented in this file.
   consistently across every `where`-filter path (`select`, `count`, `update`,
   `delete`, and the internal flush/tree queries), not just `select`.
 
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
+
 ### Fixed
 
 - **MySQL connection pool missing `dialect`.** The MySQL pool never set its
@@ -246,6 +707,61 @@ All notable changes to this project are documented in this file.
 - **`strict: true`.** The codebase now compiles under TypeScript `strict` mode
   (`noImplicitAny`, `strictNullChecks`, et al.), so the published typings and
   public API surface are precise and null-aware.
+
+- Table and column comments. `defineRecord` and every field factory accept
+  `comment`; migrations store them on MySQL (inline) and PostgreSQL
+  (`comment on` statements), and introspection reads them back there. SQLite
+  has no comment storage, so nothing is emitted or reflected for it. The
+  generated OpenAPI document uses comments as its documentation — a table
+  comment describes the resource's schema and tag, a column comment its
+  property in row schemas and request bodies — and a resource's `description`
+  overrides its table comment. With record definitions the comments work on
+  every engine, since the database never needs to store them; `sqlex openapi`
+  now derives the schema from the config's `models` when present, for the same
+  reason.
+
+- An `include` can no longer reach around an `authorize` gate: embedding a
+  resource requires its read authorization to pass too, checked at every depth
+  before the query runs, so a relation cannot expose rows the resource refuses
+  directly. Row-level access through the include is still the target's scope.
+- Malformed percent-encoding in the path is a `404` for a resource segment and
+  a `400` for an identity value, rather than an uncaught `URIError` surfacing
+  as a `500`.
+- A client-supplied foreign key must reference a row the target resource's
+  scope admits for the request, checked inside the write's transaction; a
+  cross-tenant reference is refused with the same 422 a dangling one gets, so
+  it confirms nothing. `assign`-stamped values and unscoped or unexposed
+  targets are exempt.
+- The OpenAPI document can declare authentication: `securitySchemes` (and
+  optionally `security`) reach the document, and every operation gains a 401.
+  Component schema names are validated at compile time, so a model named
+  `Problem`, or one colliding with a generated `<Model>Create` body, is
+  rejected instead of silently overwriting part of the document.
+- Two hooks close the gap below operations and rows. `beforeWrite(context,
+  { operation, data, row })` holds value-level rules — a customer may only
+  cancel an open order — running after validation and `assign`, and for update
+  and delete inside the write's transaction with the current row in hand;
+  throwing an `ApiError` refuses with that status, returning a document
+  replaces the data, and the event separates `body` (what the client sent)
+  from `data` (the final write with `assign` applied). `afterRead(context, row)` transforms rows as they are
+  served — per-role redaction, derived values — over the serialised shape, and
+  follows the resource's rows into embedded relations and write responses.
+- `authorize(context, operation)` gates operations per request — an admin may
+  change products but not close the shop — answering `403` before anything is
+  parsed or read, and documented as such in the OpenAPI output. The scope
+  contract is pinned down for roles: `{}` is unrestricted (the super-user
+  case), an empty array admits nothing (a grant lookup that found no tenants
+  fails closed), and `assign` may stamp different columns per role or none.
+- Multi-tenancy is now airtight and ergonomic. A resource's `scope` follows
+  its rows wherever they are reached: an embedded collection is filtered by its
+  own resource's scope inside the nested query, and an expanded foreign key
+  whose target's scope does not admit the row is reduced back to the bare
+  `{id}` reference, at any include depth. `assign` is the write-side
+  counterpart: server-set values applied after validation and on top of every
+  create and update body, so a tenant column comes from the authenticated
+  context rather than the client — and the compiler accepts a required column
+  being withheld from clients when `assign` is there to supply it. See
+  [Multi-tenancy](./docs/multi-tenancy.md) and `examples/multi-tenant`.
 
 ### Fixed
 

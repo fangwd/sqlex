@@ -24,6 +24,8 @@ export function sqlDefault(sql: string): SqlDefault {
 
 export interface FieldOptions {
   column?: string;
+  /** Column comment: stored by mysql and postgres, and used as API docs. */
+  comment?: string;
   nullable?: boolean;
   primaryKey?: boolean;
   unique?: boolean;
@@ -307,6 +309,8 @@ export interface RecordDefinition<
   unique?: readonly (readonly string[])[];
   indexes?: readonly RecordIndexDefinition[];
   checks?: readonly RecordCheckDefinition[];
+  /** Table comment: stored by mysql and postgres, and used as API docs. */
+  comment?: string;
 }
 
 type FieldValue<TField extends AnyFieldDefinition> =
@@ -813,7 +817,12 @@ function tableFromRecord(
     });
   }
 
-  return { name: recordClass.definition.table, columns, constraints };
+  return {
+    name: recordClass.definition.table,
+    columns,
+    constraints,
+    comment: recordClass.definition.comment,
+  };
 }
 
 function columnFromField(
@@ -842,6 +851,8 @@ function columnFromField(
       nullable: definition.options.nullable === true,
       autoIncrement: false,
       default: literalDefault(definition.options.default),
+      // The spread must not hand this column the target's own comment.
+      comment: definition.options.comment,
     };
   }
 
@@ -852,9 +863,14 @@ function columnFromField(
     nullable: options.nullable === true,
     autoIncrement: options.generated,
     default: literalDefault(options.default),
+    comment: options.comment,
   };
   if (definition.kind === 'string') {
     column.size = (options as StringFieldOptions).maxLength;
+  } else if (definition.kind === 'decimal') {
+    const decimalOptions = options as DecimalFieldOptions;
+    column.precision = decimalOptions.precision;
+    column.scale = decimalOptions.scale;
   } else if (definition.kind === 'vector') {
     column.dimensions = (options as VectorFieldOptions).dimensions;
   } else if (definition.kind === 'enum') {

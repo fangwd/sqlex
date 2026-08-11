@@ -855,6 +855,50 @@ test('claim', async() => {
   });
 });
 
+test('writes join a caller transaction and roll back with it', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const table = db.table('category');
+  const name = `tx-${helper.getId()}`;
+
+  await expect(
+    db.transaction(async connection => {
+      await table.create({ name }, undefined, connection);
+      // Visible to this transaction before it is abandoned.
+      expect(await table.select('*', { where: { name } }, undefined, connection)).toHaveLength(1);
+      throw Error('aborted');
+    })
+  ).rejects.toThrow('aborted');
+
+  expect(await table.select('*', { where: { name } })).toEqual([]);
+
+  const kept = `tx-${helper.getId()}`;
+  await db.transaction(async connection => {
+    const row = await table.create({ name: kept }, undefined, connection);
+    await table.update({ name: `${kept}-renamed` }, { id: row.id as number }, connection);
+  });
+  expect(await table.select('*', { where: { name: `${kept}-renamed` } })).toHaveLength(1);
+
+  await db.end();
+});
+
+test('a delete joins a caller transaction instead of committing on its own', async () => {
+  const db = helper.connectToDatabase(NAME);
+  const table = db.table('category');
+  const name = `tx-${helper.getId()}`;
+  const row = await table.create({ name });
+
+  await expect(
+    db.transaction(async connection => {
+      await table.delete({ id: row.id as number }, connection);
+      throw Error('aborted');
+    })
+  ).rejects.toThrow('aborted');
+
+  expect(await table.select('*', { where: { name } })).toHaveLength(1);
+  await table.delete({ id: row.id as number });
+  await db.end();
+});
+
 describe('db.select', () => {
   test('select(*) from table should return all rows', async () => {
     const db = helper.connectToDatabase(NAME);

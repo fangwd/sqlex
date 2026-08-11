@@ -97,12 +97,11 @@ examples.
 ## Serialising object graphs
 
 `selectTree` collects a row and everything reachable from it into a set of related
-records, which a serialiser can render. `JsonSerialiser` produces nested JSON and
-`XstreamSerialiser` produces XStream-style XML:
+records, which `JsonSerialiser` renders as nested JSON:
 
 ```js
-import { selectTree, XstreamSerialiser } from 'sqlex';
+import { selectTree, JsonSerialiser } from 'sqlex';
 
 const result = await selectTree(db.table('order'), { id: 1 });
-const xml = new XstreamSerialiser(result).serialise(db.table('order').model, []);
+const json = new JsonSerialiser(result).serialise(db.table('order').model);
 ```

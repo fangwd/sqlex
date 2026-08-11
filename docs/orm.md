@@ -59,6 +59,13 @@ Fields support `nullable`, `primaryKey`, `unique`, `generated`, `default`,
 | `field.enum()` | Literal union | Requires `values`; accepts `typeName` |
 | `field.foreignKey()` | Target record | Accepts a record or primary key when writing |
 
+Every factory also accepts `comment`, and `defineRecord` a table-level
+`comment`. Both are compiled into the DDL on MySQL (inline) and PostgreSQL
+(`comment on` statements) and read back by introspection there; SQLite has no
+comment storage, so nothing is emitted for it. The [REST API](./api.md) uses
+comments as documentation in the generated OpenAPI document, which works on
+every engine when the schema comes from record definitions.
+
 ### Time zones
 
 `field.datetime({ timezone: true })` compiles to `timestamptz` on PostgreSQL,

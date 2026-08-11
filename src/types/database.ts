@@ -7,6 +7,7 @@ export interface Table {
   name: string;
   columns: Column[];
   constraints: Constraint[];
+  comment?: string;
 }
 
 export type ScalarValue = string | number | boolean | Date | null;
@@ -176,6 +177,7 @@ export interface UserDefinedType {
 export interface Column {
   name: string;
   type: string;
+  comment?: string;
   /** Number of entries required for a vector column. */
   dimensions?: number;
   size?: number;

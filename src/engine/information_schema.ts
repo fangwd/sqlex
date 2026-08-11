@@ -204,7 +204,7 @@ class Builder {
       this.getReferentialActions()
     ]).then(result => {
       const [
-        tableSet,
+        tableMap,
         tableColumnsMap,
         tableConstraintMap,
         tableConstraintColumnsMap,
@@ -217,12 +217,14 @@ class Builder {
       };
 
       for (const tableName in tableColumnsMap) {
-        if (!tableSet.has(tableName)) continue;
+        if (!tableMap.has(tableName)) continue;
         const tableInfo: TableInfo = {
           name: tableName,
           columns: tableColumnsMap[tableName],
           constraints: []
         };
+        const comment = tableMap.get(tableName);
+        if (comment) tableInfo.comment = comment;
 
         for (const constraintName in tableConstraintMap[tableName]) {
           const type = tableConstraintMap[tableName][constraintName];
@@ -258,21 +260,25 @@ class Builder {
     });
   }
 
-  getTables(): Promise<Set<string>> {
+  getTables(): Promise<Map<string, string | undefined>> {
     return query(
       this.connection,
       `
-        select table_name from information_schema.tables
+        select table_name, table_comment from information_schema.tables
         where table_schema = ${
           this.escapedSchemaName
         } and table_type = 'BASE TABLE'
         `
     ).then(rows => {
-      const set = new Set<string>();
+      const map = new Map<string, string | undefined>();
       for (const row of rows) {
-        set.add(row.table_name as string);
+        // mysql reports '' for a table with no comment.
+        map.set(
+          row.table_name as string,
+          (row.table_comment as string) || undefined
+        );
       }
-      return set;
+      return map;
     });
   }
 
@@ -282,7 +288,7 @@ class Builder {
       `
         select table_name, column_name, ordinal_position, column_default,
         is_nullable, data_type, character_maximum_length, numeric_precision,
-        numeric_scale, column_type, extra
+        numeric_scale, column_type, extra, column_comment
         from information_schema.columns
         where table_schema = ${this.escapedSchemaName}`
     ).then(rows => {
@@ -311,6 +317,9 @@ class Builder {
         }
         if (row.column_default !== null && row.column_default !== undefined) {
           columnInfo.default = row.column_default as ColumnInfo['default'];
+        }
+        if (row.column_comment) {
+          columnInfo.comment = row.column_comment as string;
         }
         ordered[tableName].push([row.ordinal_position as number, columnInfo]);
       }

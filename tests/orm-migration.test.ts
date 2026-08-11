@@ -10,10 +10,13 @@ import {
   field,
   makeMigration,
   migrationChecksum,
+  migrationSchemaFromRecords,
+  schemaFromRecords,
   operation,
   sqlDefault,
 } from '../src';
 import { runtimeOf } from '../src/record';
+import { SimpleField } from '../src/schema';
 import * as helper from './helper';
 
 const NAME = 'orm_migration';
@@ -606,6 +609,54 @@ test('baseline rejects changed defaults and referential actions', async () => {
     await db.query('drop table baseline_parent');
     await db.end();
   }
+});
+
+test('a decimal keeps its precision and scale in the derived schema', () => {
+  class Invoice extends defineRecord({
+    table: 'orm_invoice',
+    fields: {
+      id: field.id(),
+      total: field.decimal({ precision: 12, scale: 2 }),
+      rate: field.decimal({ precision: 5 }),
+      plain: field.decimal(),
+      count: field.integer(),
+    },
+  }) {}
+
+  // The runtime schema carries them, so anything reading a column back knows
+  // the declared scale, not just the migration that created it.
+  const schema = schemaFromRecords({ Invoice });
+  const columnOf = (name: string) =>
+    (schema.model('Invoice')?.field(name) as SimpleField).column;
+
+  expect(columnOf('total')).toEqual(
+    expect.objectContaining({ type: 'decimal', precision: 12, scale: 2 })
+  );
+  expect(columnOf('rate')).toEqual(
+    expect.objectContaining({ precision: 5, scale: undefined })
+  );
+  expect(columnOf('plain').precision).toBe(undefined);
+  expect(columnOf('count').precision).toBe(undefined);
+
+  // And the DDL is unchanged by where those values now come from.
+  const encoder = {
+    dialect: 'postgres' as const,
+    escape: (value: string) => `'${value}'`,
+    escapeId: (value: string) => `"${value}"`,
+    escapeDate: (value: Date) => `'${value.toISOString()}'`,
+  };
+  const { migration } = makeMigration('0001_invoices', { Invoice });
+  const create = migration.up.find(item => item.kind === 'createTable')!;
+  const sql = new MigrationCompiler('postgres', encoder).compile(create)[0];
+  expect(sql).toContain('"total" decimal(12,2)');
+  expect(sql).toContain('"rate" decimal(5,0)');
+  expect(sql).toContain('"plain" decimal');
+
+  // The snapshot the checksum covers is the same either way.
+  const snapshot = migrationSchemaFromRecords({ Invoice });
+  expect(snapshot.tables[0].columns.find(column => column.name === 'total')).toEqual(
+    expect.objectContaining({ precision: 12, scale: 2 })
+  );
 });
 
 test('dialect compilers emit engine-specific DDL', () => {
