@@ -370,6 +370,23 @@ describe('write operations', () => {
     ]);
   });
 
+  test('a column with a SQL default is optional on create', () => {
+    const info = structuredClone(schemaInfo);
+    const table = info.tables.find(entry => entry.name === 'delivery_address')!;
+    table.columns.find(column => column.name === 'postal_code')!.defaultSql = "'00000'";
+    const doc = generateOpenApi(
+      compilePlan(new Schema(info), {
+        resources: { DeliveryAddress: { operations: ['create'] } },
+      })
+    );
+    expect(doc.components.schemas.DeliveryAddressCreate.required).toEqual([
+      'streetAddress',
+      'city',
+      'state',
+      'country',
+    ]);
+  });
+
   test('a relation is written as a key value, never an object', () => {
     const doc = document({
       resources: { OrderItem: { operations: ['create'] }, Order: {}, Product: {} },

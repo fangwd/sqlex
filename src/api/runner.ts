@@ -455,7 +455,7 @@ export async function createRow<TContext>(
   context: TContext
 ): Promise<{ row: Document; identity: Document }> {
   const body = data;
-  const stamps = resource.assign ? await resource.assign(context) : {};
+  const stamps = resource.assign ? await resource.assign(context, 'create') : {};
   data = { ...data, ...stamps };
   data = await beforeWrite(resource, context, 'create', data, body);
   return write(() =>
@@ -480,7 +480,7 @@ export async function updateRow<TContext>(
   context: TContext
 ): Promise<Document> {
   const body = data;
-  const stamps = resource.assign ? await resource.assign(context) : {};
+  const stamps = resource.assign ? await resource.assign(context, 'update') : {};
   data = { ...data, ...stamps };
   return write(() =>
     db.transaction(async connection => {

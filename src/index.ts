@@ -97,7 +97,6 @@ export type {
   BaselineOptions,
   MigrateOptions,
   Migration,
-  MigrationColumn,
   MigrationConstraint,
   MigrationDiff,
   MigrationIndex,

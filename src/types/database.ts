@@ -48,11 +48,24 @@ export type FilterOperator =
   | 'none'
   | 'exists';
 
+/**
+ * What may stand in for a column or relation inside a filter.
+ *
+ * In a relation position an array is an OR: the builder partitions it into
+ * scalar keys, matched with `in`, and filter shapes, joined and or-ed together.
+ * The array member type mirrors that, so a scope expression built as a plain
+ * document filter can be reused where a typed filter is expected.
+ */
 export type FilterValue<T> =
   | T
   | T[]
   | null
-  | (NonNullable<T> extends object ? FilterShape<NonNullable<T>> | ScalarValue : never);
+  | (NonNullable<T> extends object
+      ?
+          | FilterShape<NonNullable<T>>
+          | ScalarValue
+          | Array<FilterShape<NonNullable<T>> | ScalarValue>
+      : never);
 
 export type FilterShape<TRow extends object = Document> = {
   [K in keyof TRow & string]?: FilterValue<TRow[K]>;
@@ -186,6 +199,16 @@ export interface Column {
   nullable?: boolean;
   autoIncrement?: boolean;
   default?: Value;
+  /**
+   * A default the database evaluates, such as `now()`, kept as written.
+   *
+   * Separate from `default`, which holds a literal value the driver can bind.
+   * A column introspected from a live database reports its expression in
+   * `default` as text; one built from a record declaration puts it here, so
+   * anything asking "does this column have a default?" must consult both —
+   * see `hasColumnDefault`.
+   */
+  defaultSql?: string;
   userDefinedType?: UserDefinedType;
 }
 

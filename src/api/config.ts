@@ -65,12 +65,18 @@ export const DEFAULT_FILTER_OPERATORS: readonly ApiFilterOperator[] = [
 export type ScopeFn<TContext> = (context: TContext) => Filter | Promise<Filter>;
 
 /**
- * Values the server sets on every create and update, keyed by field name.
- * They are applied after the body is validated and override anything the
- * client sent, so a tenant column comes from the request's identity rather
- * than from the client's say-so.
+ * Values the server sets on a write, keyed by field name. They are applied
+ * after the body is validated and override anything the client sent, so a
+ * tenant column comes from the request's identity rather than from the
+ * client's say-so.
+ *
+ * `operation` distinguishes the two writes, so one function can stamp a
+ * created-at on create and a modified-at on update without touching the other.
  */
-export type AssignFn<TContext> = (context: TContext) => Document | Promise<Document>;
+export type AssignFn<TContext> = (
+  context: TContext,
+  operation: 'create' | 'update'
+) => Document | Promise<Document>;
 
 /**
  * Whether this request may perform the operation at all. Row-level access

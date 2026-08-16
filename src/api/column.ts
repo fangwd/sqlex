@@ -1,4 +1,4 @@
-import { SimpleField } from '../schema';
+import { hasColumnDefault, SimpleField } from '../schema';
 import { ApiFilterOperator } from './config';
 
 export type ColumnKind =
@@ -98,7 +98,7 @@ export function isWritable(kind: ColumnKind): boolean {
 export function isRequiredOnCreate(field: SimpleField): boolean {
   return (
     !field.column.autoIncrement &&
-    field.column.default === undefined &&
+    !hasColumnDefault(field.column) &&
     !isNullableField(field)
   );
 }

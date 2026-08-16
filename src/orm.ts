@@ -851,6 +851,7 @@ function columnFromField(
       nullable: definition.options.nullable === true,
       autoIncrement: false,
       default: literalDefault(definition.options.default),
+      defaultSql: getSqlDefault(definition),
       // The spread must not hand this column the target's own comment.
       comment: definition.options.comment,
     };
@@ -863,6 +864,7 @@ function columnFromField(
     nullable: options.nullable === true,
     autoIncrement: options.generated,
     default: literalDefault(options.default),
+    defaultSql: getSqlDefault(definition),
     comment: options.comment,
   };
   if (definition.kind === 'string') {
@@ -933,6 +935,12 @@ function primaryField(recordClass: RecordClass): [string, AnyFieldDefinition] {
   return entries[0];
 }
 
+/**
+ * The bindable part of a default. A `sqlDefault()` is an expression for the
+ * database to evaluate, not a value, so it is carried in `column.defaultSql`
+ * instead — dropping it here without recording it there would make the column
+ * look like it has no default at all.
+ */
 function literalDefault(value: Value | SqlDefault | undefined): Value | undefined {
   return value && typeof value === 'object' && 'sql' in value
     ? undefined

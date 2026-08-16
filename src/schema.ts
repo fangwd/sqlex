@@ -952,3 +952,15 @@ function validateVirtualForeignKey(schemaInfo: types.Database, referencing: stri
     referenced: validateColumnRef(schemaInfo, referenced)
   }
 }
+
+/**
+ * Whether a column has a default the database will supply, from either form:
+ * a bound literal in `default`, or an expression in `defaultSql`.
+ *
+ * Callers deciding whether an insert must name a column need both, because the
+ * two forms come from different places — introspection fills `default`, a
+ * record declaration fills `defaultSql`.
+ */
+export function hasColumnDefault(column: types.Column): boolean {
+  return column.default !== undefined || column.defaultSql !== undefined;
+}

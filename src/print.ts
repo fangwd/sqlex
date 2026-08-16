@@ -3,7 +3,8 @@ import {
   Model,
   SimpleField,
   ForeignKeyField,
-  RelatedField
+  RelatedField,
+  hasColumnDefault
 } from './schema';
 import { Database as SchemaInfo } from './types';
 
@@ -190,7 +191,7 @@ function isNullable(field: SimpleField): boolean {
 }
 
 function createOptional(field: SimpleField): boolean {
-  return !!field.column.autoIncrement || field.column.default !== undefined || isNullable(field);
+  return !!field.column.autoIncrement || hasColumnDefault(field.column) || isNullable(field);
 }
 
 function relatedModel(field: RelatedField): Model {

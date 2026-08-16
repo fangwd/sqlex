@@ -421,10 +421,15 @@ more than reading them directly would.
 
 `assign` is the write-side counterpart: values the server sets on every create
 and update, applied after validation and on top of the body, so a tenant column
-comes from the request's identity rather than the client's say-so:
+comes from the request's identity rather than the client's say-so. It receives
+the operation, so one function can stamp differently on create and update:
 
 ```js
-assign: context => ({ tenant: context.tenantId }),
+assign: (context, operation) => ({
+  tenant: context.tenantId,
+  ...(operation === 'create' ? { createdBy: context.userId } : {}),
+  modifiedAt: new Date(),
+}),
 ```
 
 ### Value-level rules and response transforms

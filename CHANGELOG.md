@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.5.1]
+
+### Added
+
+- API `assign` hooks now receive the operation (`create` or `update`), and
+  typed filters support arrays of relation filter shapes and scalar values.
+- SQL-expression defaults from record definitions are preserved in schemas,
+  migrations, generated types, and OpenAPI create requirements.
+
+### Fixed
+
+- Fixed migration default handling and removed the redundant public
+  `MigrationColumn` type.
+
 ## [4.5.0]
 
 ### Removed

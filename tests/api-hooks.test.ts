@@ -279,3 +279,33 @@ describe('afterRead', () => {
     expect(row.code).toBe(String(created.code).toLowerCase());
   });
 });
+
+describe('assign', () => {
+  test('receives the operation, so create and update can stamp differently', async () => {
+    const operations: string[] = [];
+    const api = createApi<Context>(db, {
+      basePath: '/api',
+      resources: {
+        Order: {
+          operations: ['create', 'update'],
+          write: { fields: ['code'] },
+          assign: (context, operation) => {
+            operations.push(operation);
+            return { user: 3, status: operation === 'create' ? 1 : 2 };
+          },
+        },
+        User: {},
+      },
+    });
+    const code = `assign-op-${Math.floor(Math.random() * 1e6)}`;
+    const created = await send(api, 'POST', '/api/orders', { code }, { role: 'staff' });
+    expect(created.status).toBe(201);
+    const row = ((await created.json()) as Document).data as Document;
+    expect(row.status).toBe(1);
+
+    const updated = await send(api, 'PATCH', `/api/orders/${row.id}`, { code }, { role: 'staff' });
+    expect(updated.status).toBe(200);
+    expect((((await updated.json()) as Document).data as Document).status).toBe(2);
+    expect(operations).toEqual(['create', 'update']);
+  });
+});

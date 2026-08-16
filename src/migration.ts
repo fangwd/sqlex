@@ -13,17 +13,12 @@ import {
   type DialectEncoder,
 } from './engine';
 import {
-  getSqlDefault,
   type AnyFieldDefinition,
   type RecordClass,
   type RecordClassMap,
   schemaFromRecords,
 } from './orm';
 import { encodeVector, isVectorColumn } from './vector';
-
-export interface MigrationColumn extends Column {
-  defaultSql?: string;
-}
 
 export type MigrationConstraint = Constraint;
 
@@ -45,7 +40,7 @@ export interface MigrationCheck {
 
 export interface MigrationTable {
   name: string;
-  columns: MigrationColumn[];
+  columns: Column[];
   constraints: MigrationConstraint[];
   indexes: MigrationIndex[];
   checks?: MigrationCheck[];
@@ -60,7 +55,7 @@ export interface MigrationSchema {
 export type MigrationOperation =
   | { kind: 'createTable'; table: MigrationTable }
   | { kind: 'dropTable'; table: string }
-  | { kind: 'addColumn'; table: string; column: MigrationColumn }
+  | { kind: 'addColumn'; table: string; column: Column }
   | { kind: 'dropColumn'; table: string; column: string }
   | { kind: 'renameColumn'; table: string; from: string; to: string }
   | { kind: 'addConstraint'; table: string; constraint: MigrationConstraint }
@@ -131,7 +126,7 @@ export const operation = Object.freeze({
   }),
   addColumn: (
     table: string,
-    column: MigrationColumn
+    column: Column
   ): MigrationOperation => ({ kind: 'addColumn', table, column }),
   dropColumn: (table: string, column: string): MigrationOperation => ({
     kind: 'dropColumn',
@@ -190,14 +185,6 @@ export function migrationSchemaFromRecords(
     tables: schema.tables.map(table => {
       const recordClass = byTable.get(table.name)!;
       const fields = Object.entries(recordClass.definition.fields);
-      const columns = table.columns.map(column => {
-        const field = fields.find(([fieldName, definition]) =>
-          getColumnName(fieldName, definition) === column.name
-        )![1];
-        // precision and scale come from the column itself, which the record
-        // definition already carries.
-        return { ...column, defaultSql: getSqlDefault(field) };
-      });
       const constraints = table.constraints.map(constraint => {
         if (!constraint.references) return constraint;
         const field = fields.find(([fieldName, definition]) =>
@@ -244,7 +231,6 @@ export function migrationSchemaFromRecords(
       );
       return {
         ...table,
-        columns,
         constraints,
         indexes,
         ...(checks.length ? { checks } : {}),
@@ -490,7 +476,7 @@ export class MigrationCompiler {
     return statements;
   }
 
-  private columnComment(table: string, column: MigrationColumn): string[] {
+  private columnComment(table: string, column: Column): string[] {
     if (this.dialect !== 'postgres' || !column.comment) return [];
     return [
       `comment on column ${this.id(table)}.${this.id(column.name)} is ` +
@@ -498,7 +484,7 @@ export class MigrationCompiler {
     ];
   }
 
-  private column(column: MigrationColumn, suffix = ''): string {
+  private column(column: Column, suffix = ''): string {
     let type = this.type(column);
     if (
       this.dialect === 'postgres' &&
@@ -534,7 +520,7 @@ export class MigrationCompiler {
     return sql + suffix;
   }
 
-  private type(column: MigrationColumn): string {
+  private type(column: Column): string {
     const type = column.type.toLowerCase();
     if (type === 'vector') {
       return column.dimensions === undefined
@@ -582,7 +568,7 @@ export class MigrationCompiler {
     return type;
   }
 
-  private defaultValue(column: MigrationColumn): string | undefined {
+  private defaultValue(column: Column): string | undefined {
     if (column.defaultSql) return column.defaultSql;
     if (column.default === undefined) return undefined;
     if (column.default === null) return 'null';
@@ -1338,7 +1324,7 @@ function sameConstraintShape(
 
 function sameColumnDefault(
   actual: Column,
-  expected: MigrationColumn
+  expected: Column
 ): boolean {
   if (expected.autoIncrement) return true;
   const wanted = expected.defaultSql ?? expected.default;
@@ -1378,7 +1364,7 @@ function sameColumnDefault(
 
 function sameColumnDimensions(
   actual: Column,
-  expected: MigrationColumn,
+  expected: Column,
   dialect: Dialect
 ): boolean {
   const type = normalizeColumnType(expected.type, dialect);
@@ -1438,7 +1424,7 @@ function normalizeReferentialAction(value: string | undefined): string {
     : action;
 }
 
-function hasUsableColumnDefault(column: MigrationColumn): boolean {
+function hasUsableColumnDefault(column: Column): boolean {
   if (column.default !== undefined && column.default !== null) return true;
   return column.defaultSql !== undefined &&
     normalizeSqlDefault(column.defaultSql) !== 'null';
