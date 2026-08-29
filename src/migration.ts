@@ -17,6 +17,7 @@ import {
   type AnyFieldDefinition,
   type RecordClass,
   type RecordClassMap,
+  columnName,
   schemaFromRecords,
 } from './orm';
 import { encodeVector, isVectorColumn } from './vector';
@@ -205,7 +206,7 @@ export function migrationSchemaFromRecords(
       const constraints = table.constraints.map(constraint => {
         if (!constraint.references) return constraint;
         const field = fields.find(([fieldName, definition]) =>
-          getColumnName(fieldName, definition) === constraint.columns[0]
+          columnName(fieldName, definition) === constraint.columns[0]
         )![1];
         return {
           ...constraint,
@@ -216,7 +217,7 @@ export function migrationSchemaFromRecords(
       const indexes = fields.flatMap(([fieldName, definition]) => {
         const configured = definition.options.index;
         if (!configured) return [];
-        const column = getColumnName(fieldName, definition);
+        const column = columnName(fieldName, definition);
         return [{
           name: typeof configured === 'string'
             ? configured
@@ -229,7 +230,7 @@ export function migrationSchemaFromRecords(
         if (!definition) {
           throw Error(`${table.name}: unknown field ${fieldName} in index`);
         }
-        return getColumnName(fieldName, definition);
+        return columnName(fieldName, definition);
       };
       for (const declared of recordClass.definition.indexes || []) {
         const indexColumns = declared.fields.map(columnOf);
@@ -268,12 +269,7 @@ export function diffMigrationSchemas(
   const nextTables = new Map(next.tables.map(table => [table.name, table]));
 
   const newTables = next.tables.filter(table => !previousTables.has(table.name));
-  for (const table of sortTablesByReferences(newTables)) {
-    operations.push(operation.createTable(table));
-    for (const index of table.indexes) {
-      operations.push(operation.createIndex(table.name, index));
-    }
-  }
+  operations.push(...createTableOperations(newTables));
 
   for (const table of next.tables) {
     const oldTable = previousTables.get(table.name);
@@ -1245,28 +1241,47 @@ function diffIndexes(
   }
 }
 
-function sortTablesByReferences(tables: MigrationTable[]): MigrationTable[] {
+interface DeferredConstraint {
+  table: string;
+  constraint: MigrationConstraint;
+}
+
+/**
+ * Operations that create every table in dependency order. A foreign key that
+ * closes a cycle is left out of its table and added once all tables exist.
+ */
+function createTableOperations(tables: MigrationTable[]): MigrationOperation[] {
   const pending = new Map(tables.map(table => [table.name, table]));
-  const result: MigrationTable[] = [];
+  const operations: MigrationOperation[] = [];
+  const deferred: DeferredConstraint[] = [];
+  const blocks = (table: MigrationTable, constraint: MigrationConstraint) =>
+    Boolean(constraint.references) &&
+    constraint.references!.table !== table.name &&
+    pending.has(constraint.references!.table);
   while (pending.size) {
-    const ready = [...pending.values()].find(table =>
-      table.constraints.every(constraint =>
-        !constraint.references ||
-        constraint.references.table === table.name ||
-        !pending.has(constraint.references.table)
-      )
+    let next = [...pending.values()].find(table =>
+      !table.constraints.some(constraint => blocks(table, constraint))
     );
-    if (!ready) {
-      throw Error(
-        'Cannot generate migration for cyclic foreign keys between new tables: ' +
-        `${[...pending.keys()].join(', ')}; add those tables and constraints ` +
-        'in an explicit migration'
-      );
+    if (!next) {
+      const [first] = pending.values();
+      for (const constraint of first.constraints) {
+        if (blocks(first, constraint)) deferred.push({ table: first.name, constraint });
+      }
+      next = {
+        ...first,
+        constraints: first.constraints.filter(constraint => !blocks(first, constraint)),
+      };
     }
-    result.push(ready);
-    pending.delete(ready.name);
+    operations.push(operation.createTable(next));
+    for (const index of next.indexes) {
+      operations.push(operation.createIndex(next.name, index));
+    }
+    pending.delete(next.name);
   }
-  return result;
+  for (const { table, constraint } of deferred) {
+    operations.push(operation.addConstraint(table, constraint));
+  }
+  return operations;
 }
 
 function constraintKey(constraint: MigrationConstraint): string {
@@ -1309,13 +1324,6 @@ function sameSchemaValue(left: unknown, right: unknown): boolean {
   return stableStringify(left) === stableStringify(right);
 }
 
-function getColumnName(
-  name: string,
-  definition: AnyFieldDefinition
-): string {
-  return definition.options.column ||
-    (definition.kind === 'foreignKey' ? `${name}_id` : name);
-}
 
 function stringOption(
   field: AnyFieldDefinition,
@@ -1397,12 +1405,7 @@ function reconcileOperations(
   const newTables = expected.tables.filter(
     table => !liveTables.has(table.name)
   );
-  for (const table of sortTablesByReferences(newTables)) {
-    created.push(operation.createTable(table));
-    for (const index of table.indexes) {
-      created.push(operation.createIndex(table.name, index));
-    }
-  }
+  created.push(...createTableOperations(newTables));
 
   for (const table of expected.tables) {
     const actual = liveTables.get(table.name);

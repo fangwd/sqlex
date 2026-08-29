@@ -76,8 +76,7 @@ schema snapshots. Never edit an applied migration; add a new migration instead.
 
 Generated migrations are additive. Removed or changed columns and constraints
 produce warnings and require explicit operations. Required columns without a
-default need a backfill migration. Mutually cyclic new tables require a manual,
-dialect-aware migration.
+default need a backfill migration.
 
 SQLite cannot add or remove constraints in place. Such changes require an
 explicit table rebuild.

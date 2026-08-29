@@ -217,7 +217,7 @@ export class Model {
 
   checkUniqueKey(
     row: types.Document,
-    reject?: (value: any) => boolean
+    reject?: (value: unknown, field: SimpleField) => boolean
   ): UniqueKey | null {
     if (!row) return null;
 
@@ -229,7 +229,7 @@ export class Model {
       if (value === undefined) {
         value = row[field.name + '__in'];
       }
-      if (reject(value)) {
+      if (reject(value, field)) {
         uniqueKey = null;
         break;
       }
@@ -240,7 +240,7 @@ export class Model {
         if (!key.primary) {
           let missing;
           for (const field of key.fields) {
-            if (reject(row[field.name])) {
+            if (reject(row[field.name], field)) {
               missing = field;
               break;
             }

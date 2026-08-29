@@ -640,7 +640,7 @@ export async function replaceRecord(
       const childRecords = [];
 
       const referencingTable = table.db.table(field.referencingField.model);
-      const value = runtimeOf(record).primaryKey();
+      const value = runtimeOf(record).referenceValue(field.referencingField);
 
       const mapTable = await _buildMapTable(connection, referencingTable, {
         [field.referencingField.name]: value

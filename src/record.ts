@@ -1,5 +1,6 @@
-import { Table, _toCamel, isEmpty, getUniqueFields } from './database';
+import { Table, _toCamel, getUniqueFields } from './database';
 import {
+  Field,
   SimpleField,
   ForeignKeyField,
   UniqueKey,
@@ -81,13 +82,13 @@ const RecordProxy: ProxyHandler<Record> = {
         const referencedModel = field.referencedField.model;
         let removeDirty = false;
         if (typeof value !== 'object') {
-          value = { [referencedModel.keyField()!.name]: value };
+          value = { [field.referencedField.name]: value };
           removeDirty = true;
         }
         const parent = runtime.table.db.table(referencedModel).append(value);
         runtime.data[name] = parent;
         if (removeDirty) {
-          runtimeOf(parent).removeDirty(referencedModel.keyField()!.name);
+          runtimeOf(parent).removeDirty(field.referencedField.name);
         }
       }
       runtime.state.dirty.add(name);
@@ -251,7 +252,8 @@ export class RecordRuntime {
     if (this.state.merged) return false;
     if (this.state.selected && this.connect) return false;
 
-    if (!this.table.model.checkUniqueKey(this.data as Document, isEmpty)) {
+    const unsettled = (_: unknown, field: SimpleField) => !this.hasValue(field.name);
+    if (!this.table.model.checkUniqueKey(this.data as Document, unsettled)) {
       if (
         this.table.model.uniqueKeys.length > 1 ||
         !this.table.model.primaryKey.autoIncrement()
@@ -264,7 +266,7 @@ export class RecordRuntime {
 
     let flushable = 0;
     this.state.dirty.forEach(key => {
-      if (!isEmpty(this.data[key])) flushable++;
+      if (this.hasValue(key)) flushable++;
     });
     if (flushable === 0) return false;
     return perfect ? flushable === this.state.dirty.size : true;
@@ -273,9 +275,25 @@ export class RecordRuntime {
   fields(): Row {
     const fields: Row = {};
     this.state.dirty.forEach(key => {
-      if (!isEmpty(this.data[key])) fields[key] = this.value(key);
+      if (this.hasValue(key)) fields[key] = this.value(key);
     });
     return fields;
+  }
+
+  /**
+   * Whether a field can be written now. A parent record counts once the field
+   * it is referenced by is settled: assigned and not waiting on its own flush.
+   */
+  private hasValue(key: string): boolean {
+    const value = this.data[key];
+    if (!(value instanceof Record)) return value !== undefined;
+    let parent = runtimeOf(value);
+    while (parent.state.merged) parent = runtimeOf(parent.state.merged);
+    const field = this.table.model.field(key);
+    const name = field instanceof ForeignKeyField
+      ? field.referencedField.name
+      : parent.table.model.primaryKey.fields[0].name;
+    return !parent.state.dirty.has(name) && parent.value(name) !== undefined;
   }
 
   removeDirty(keys: string | string[]) {
@@ -295,9 +313,16 @@ export class RecordRuntime {
     if (value instanceof Record) {
       let parent = runtimeOf(value);
       while (parent.state.merged) parent = runtimeOf(parent.state.merged);
-      return parent.primaryKey();
+      return parent.referenceValue(this.table.model.field(name));
     }
     return value as Value;
+  }
+
+  /** The value a foreign key stores for this record: its referenced field, or the primary key. */
+  referenceValue(field: Field | undefined): Value {
+    return field instanceof ForeignKeyField
+      ? this.value(field.referencedField.name)
+      : this.primaryKey();
   }
 
   primaryKey(): Value {

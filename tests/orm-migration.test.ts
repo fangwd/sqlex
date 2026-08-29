@@ -418,12 +418,12 @@ test('required column additions require an explicit backfill migration', () => {
   expect(nullDefault.warnings[0]).toContain('explicit backfill migration');
 });
 
-test('generated migrations reject mutually cyclic new tables', () => {
+test('mutually cyclic new tables defer one foreign key until both exist', async () => {
   class CycleA extends defineRecord({
     table: 'cycle_a',
     fields: {
       id: field.id(),
-      b: field.foreignKey('cycle_b'),
+      b: field.foreignKey('cycle_b', { nullable: true }),
     },
   }) {}
   class CycleB extends defineRecord({
@@ -434,8 +434,193 @@ test('generated migrations reject mutually cyclic new tables', () => {
     },
   }) {}
 
-  expect(() => makeMigration('0001_cycle', { CycleA, CycleB }))
-    .toThrow('cyclic foreign keys');
+  const { migration, warnings } = makeMigration('0001_cycle', { CycleA, CycleB });
+  expect(warnings).toEqual([]);
+  expect(migration.up.map(item => item.kind)).toEqual([
+    'createTable',
+    'createTable',
+    'addConstraint',
+  ]);
+  const [first, , deferred] = migration.up;
+  expect(first.kind === 'createTable' && first.table.constraints.some(c => c.references)).toBe(false);
+  const closing = {
+    name: 'cycle_a_b_id_fkey',
+    columns: ['b_id'],
+    references: { table: 'cycle_b', columns: ['id'] },
+  };
+  expect(deferred).toEqual(operation.addConstraint('cycle_a', closing));
+  expect(migration.down.map(item => item.kind)).toEqual([
+    'dropConstraint',
+    'dropTable',
+    'dropTable',
+  ]);
+
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  try {
+    if (helper.isSqlite3(db.pool.dialect)) {
+      await expect(runner.reconcile({ CycleA, CycleB }))
+        .rejects.toThrow('SQLite cannot add constraints');
+      return;
+    }
+    const sql = await runner.reconcile({ CycleA, CycleB });
+    expect(sql.filter(item => /^alter table/i.test(item))).toHaveLength(1);
+    expect(await runner.reconcile({ CycleA, CycleB })).toEqual([]);
+  } finally {
+    if (!helper.isSqlite3(db.pool.dialect)) {
+      for (const sql of runner.compiler.compile(operation.dropConstraint('cycle_a', closing))) {
+        await db.query(sql);
+      }
+    }
+    await db.query('drop table if exists cycle_b');
+    await db.query('drop table if exists cycle_a');
+    await db.end();
+  }
+});
+
+test('a foreign key can reference a unique field instead of the primary key', async () => {
+  class Kind extends defineRecord({
+    table: 'ref_kind',
+    fields: {
+      id: field.id(),
+      code: field.string({ maxLength: 40, unique: true }),
+      label: field.string({ maxLength: 80, nullable: true }),
+    },
+  }) {}
+  class Item extends defineRecord({
+    table: 'ref_item',
+    fields: {
+      id: field.id(),
+      kind: field.foreignKey(() => Kind, { references: 'code' }),
+      name: field.string({ maxLength: 80 }),
+    },
+  }) {}
+  class Broken extends defineRecord({
+    table: 'ref_broken',
+    fields: {
+      id: field.id(),
+      kind: field.foreignKey(() => Kind, { references: 'label' }),
+    },
+  }) {}
+
+  const schema = migrationSchemaFromRecords({ Kind, Item });
+  const item = schema.tables.find(table => table.name === 'ref_item')!;
+  const column = item.columns.find(column => column.name === 'kind_code')!;
+  expect(column).toMatchObject({ type: 'varchar', size: 40, nullable: false });
+  expect(item.constraints.find(constraint => constraint.references)).toEqual({
+    name: 'ref_item_kind_code_fkey',
+    columns: ['kind_code'],
+    references: { table: 'ref_kind', columns: ['code'] },
+  });
+  expect(() => migrationSchemaFromRecords({ Kind, Broken }))
+    .toThrow('can only reference a primary key or unique field');
+
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  try {
+    await runner.reconcile({ Kind, Item });
+    const models = db.bind({ Kind, Item });
+    const tile = await models.Kind.create({ code: 'tile' });
+    const paint = await models.Kind.create({ code: 'paint' });
+
+    const byRecord = await models.Item.create({ kind: tile, name: 'subway' });
+    const byValue = await models.Item.create({ kind: 'paint', name: 'eggshell' });
+    const rows = await db.query('select name, kind_code from ref_item order by name');
+    expect(rows).toEqual([
+      { name: 'eggshell', kind_code: 'paint' },
+      { name: 'subway', kind_code: 'tile' },
+    ]);
+
+    const loaded = await models.Item.filter({ id: byRecord.id }).select({ kind: '*' }).first();
+    expect(loaded?.kind).toBeInstanceOf(Kind);
+    expect(loaded?.kind.id).toBe(tile.id);
+    expect(loaded?.kind.code).toBe('tile');
+
+    // an unexpanded parent carries the referenced value, and filters resolve by it
+    const stub = await models.Item.get({ id: byValue.id });
+    expect(stub?.kind).toBeInstanceOf(Kind);
+    expect(stub?.kind.code).toBe('paint');
+    expect(await models.Item.filter({ kind: { code: 'tile' } }).count()).toBe(1);
+    expect(await models.Item.filter({ kind: 'paint' }).count()).toBe(1);
+    expect(await models.Item.filter({ kind: { label: null } }).count()).toBe(2);
+
+    await models.Item.filter({ id: byValue.id }).update({ kind: tile });
+    byRecord.kind = paint;
+    await byRecord.save();
+    const after = await db.query('select name, kind_code from ref_item order by name');
+    expect(after).toEqual([
+      { name: 'eggshell', kind_code: 'tile' },
+      { name: 'subway', kind_code: 'paint' },
+    ]);
+  } finally {
+    await db.query('drop table if exists ref_item');
+    await db.query('drop table if exists ref_kind');
+    await db.end();
+  }
+});
+
+test('a references foreign key can be part of the primary key', async () => {
+  class Kind extends defineRecord({
+    table: 'lk_kind',
+    fields: {
+      id: field.id(),
+      code: field.string({ maxLength: 40, unique: true }),
+    },
+  }) {}
+  class Group extends defineRecord({
+    table: 'lk_group',
+    fields: {
+      id: field.id(),
+      name: field.string({ maxLength: 40, unique: true }),
+    },
+  }) {}
+  class Link extends defineRecord({
+    table: 'lk_link',
+    fields: {
+      kind: field.foreignKey(() => Kind, { references: 'code', primaryKey: true }),
+      group: field.foreignKey(() => Group, { primaryKey: true }),
+      role: field.string({ maxLength: 20, default: 'member' }),
+    },
+  }) {}
+
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  try {
+    await runner.reconcile({ Kind, Group, Link });
+    const models = db.bind({ Kind, Group, Link });
+    const tile = await models.Kind.create({ code: 'tile' });
+    const paint = await models.Kind.create({ code: 'paint' });
+    const main = await models.Group.create({ name: 'main' });
+    const rows = () => db.query('select kind_code, role from lk_link order by kind_code');
+
+    // the created record's parent is a stub holding only the referenced value
+    const link = await models.Link.create({ kind: tile, group: main });
+    await models.Link.create({ kind: paint, group: main });
+    link.role = 'admin';
+    await link.save();
+    expect(await rows()).toEqual([
+      { kind_code: 'paint', role: 'member' },
+      { kind_code: 'tile', role: 'admin' },
+    ]);
+
+    const loaded = await models.Link.get({ kind: 'paint', group: main.id });
+    await loaded!.update({ role: 'lead' });
+    expect(await rows()).toEqual([
+      { kind_code: 'paint', role: 'lead' },
+      { kind_code: 'tile', role: 'admin' },
+    ]);
+
+    expect(await models.Link.filter({ kind: tile }).count()).toBe(1);
+    expect(await models.Link.filter({ kind_in: [tile, paint], group: main }).count()).toBe(2);
+
+    await link.delete();
+    expect(await rows()).toEqual([{ kind_code: 'paint', role: 'lead' }]);
+  } finally {
+    await db.query('drop table if exists lk_link');
+    await db.query('drop table if exists lk_group');
+    await db.query('drop table if exists lk_kind');
+    await db.end();
+  }
 });
 
 test('migration checksums cover rollback operations and schema snapshots', () => {

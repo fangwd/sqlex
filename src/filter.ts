@@ -211,7 +211,7 @@ export class QueryBuilder {
   where(args: Filter): string {
     if (!args) return '';
     if (!this.having) {
-      args = plainify(args) as Filter;
+      args = plainify(args, this.model) as Filter;
     }
     if (Array.isArray(args)) {
       return this.or(args);
@@ -1081,7 +1081,7 @@ export class QueryBuilder {
     const builder = new QueryBuilder(this, field);
     const model = field.referencedField.model;
     const keys = Object.keys(args);
-    if (keys.length === 1 && keys[0] === model.keyField()!.name) {
+    if (keys.length === 1 && keys[0] === field.referencedField.name) {
       if (isValue((args as Document)[keys[0]])) {
         return this.expr(field, null, (args as Document)[keys[0]] as Value);
       }
@@ -1101,11 +1101,11 @@ export class QueryBuilder {
     const builder = new QueryBuilder(this, field);
     const model = field.referencedField.model;
     const keys = Object.keys(args);
-    if (keys.length === 1 && keys[0] === model.keyField()!.name) {
+    if (keys.length === 1 && keys[0] === field.referencedField.name) {
       return this.expr(field, null, (args as Document)[keys[0]] as Value);
     }
     const lhs = this.encodeField(field.column.name);
-    const rhs = builder.select(model.keyField()!.column.name, { where: args });
+    const rhs = builder.select(field.referencedField.column.name, { where: args });
     return `${lhs} in (${rhs})`;
   }
 
@@ -1178,26 +1178,52 @@ export function encodeFilter(
   return builder.where(args);
 }
 
-export function plainify(value: unknown): unknown {
+/** Replaces records in a filter with the values their foreign keys compare against. */
+export function plainify(value: unknown, model?: Model): unknown {
   if (Array.isArray(value)) {
-    return value.filter((entry) => entry !== undefined).map((entry) => plainify(entry));
-  } else if (isValue(value)) {
-    return value;
-  } else if (value instanceof Record) {
-    const model = runtimeOf(value).table.model;
-    if (runtimeOf(value).primaryKey()) {
-      return { [model.keyField()!.name]: runtimeOf(value).primaryKey() };
-    } else {
-      return getUniqueFields(model, runtimeOf(value).data as Document);
-    }
-  } else {
-    const result: { [key: string]: unknown } = {};
-    const record = value as { [key: string]: unknown };
-    for (const key in record) {
-      result[key] = plainify(record[key]);
-    }
-    return result;
+    return value.filter(entry => entry !== undefined).map(entry => plainify(entry, model));
   }
+  if (isValue(value)) return value;
+  if (value instanceof Record) return recordFilter(value);
+  const result: { [key: string]: unknown } = {};
+  const record = value as { [key: string]: unknown };
+  for (const key in record) {
+    const field = filterField(model, key.replace(/_[^_]+$/, ''));
+    result[key] = field instanceof ForeignKeyField
+      ? referenceFilter(field, record[key])
+      : plainify(record[key], field instanceof RelatedField ? field.referencingField.model : model);
+  }
+  return result;
+}
+
+/** The field a filter key names, or undefined when the dotted path is not a foreign key chain (a JSON path). */
+function filterField(model: Model | undefined, key: string): Field | undefined {
+  if (!model) return undefined;
+  const [head, ...rest] = key.split('.');
+  const field = model.field(head);
+  if (!rest.length) return field;
+  return field instanceof ForeignKeyField
+    ? filterField(field.referencedField.model, rest.join('.'))
+    : undefined;
+}
+
+function referenceFilter(field: ForeignKeyField, value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.filter(entry => entry !== undefined).map(entry => referenceFilter(field, entry));
+  }
+  if (value instanceof Record) {
+    const referenced = runtimeOf(value).referenceValue(field);
+    return referenced === undefined ? recordFilter(value) : referenced;
+  }
+  return plainify(value, field.referencedField.model);
+}
+
+function recordFilter(record: Record): unknown {
+  const runtime = runtimeOf(record);
+  const model = runtime.table.model;
+  return runtime.primaryKey()
+    ? { [model.keyField()!.name]: runtime.primaryKey() }
+    : getUniqueFields(model, runtime.data as Document);
 }
 
 function pkOnly(doc: Document | string, field: ForeignKeyField) {

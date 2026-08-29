@@ -1006,7 +1006,7 @@ export class Table<TSpec = any> {
       if (method !== 'update') {
         promise.then(row => {
           result[field.name] = row
-            ? row[field.referencedField.model.keyField()!.name] as Value
+            ? row[field.referencedField.name] as Value
             : null;
           return row;
         });
@@ -1515,12 +1515,9 @@ export class Table<TSpec = any> {
       const value = (data as Document)[name];
       if (existing[name] != value) {
         const field = runtimeOf(record).table.model.field(name);
-        if (field instanceof ForeignKeyField) {
-          const model = field.referencedField.model;
-          if (existing[name] !== undefined) {
-            if (pkOf(model, existing[name]) == pkOf(model, value)) {
-              continue;
-            }
+        if (field instanceof ForeignKeyField && existing[name] !== undefined) {
+          if (referenceOf(field, existing[name]) == referenceOf(field, value)) {
+            continue;
           }
         }
         existing[name] = value;
@@ -1930,14 +1927,14 @@ export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Documen
           if (!(field.name in currentResult)) {
             currentResult[fieldName] = {};
           }
-          let keyField = field.referencedField.model.keyField();
+          let keyField: SimpleField = field.referencedField;
           let result = currentResult[fieldName] as Document;
           while (keyField instanceof ForeignKeyField) {
             result[keyField.name] = {};
             result = result[keyField.name] as Document;
-            keyField = keyField.referencedField.model.keyField();
+            keyField = keyField.referencedField;
           }
-          result[keyField!.name] = value;
+          result[keyField.name] = value;
         } else {
           currentResult[fieldName] = null;
         }
@@ -1950,29 +1947,13 @@ export function toDocument(row: Row, model: Model, fieldMap?: FieldMap): Documen
   return setNullForeignKeys(result, model) as Document;
 }
 
-export function isEmpty(value: Value | Record | any) {
-  if (value === undefined) {
-    return true;
-  }
-
-  if (value instanceof Record) {
-    while (runtimeOf(value).state.merged) {
-      value = runtimeOf(value).state.merged;
-    }
-    if (runtimeOf(value).isPrimaryKeyDirty()) return true;
-    return isEmpty(runtimeOf(value).primaryKey());
-  }
-
-  return false;
-}
-
-function pkOf(model: Model, data: unknown): Value {
-  if (isValue(data)) return <Value>data;
-  const pk = model.keyField();
-  if (pk instanceof ForeignKeyField) {
-    return pkOf(pk.referencedField.model, (<Document>data)[pk.name]);
-  }
-  return <Value>(<Document>data)[pk!.name];
+/** The value `data` stores in `field`, whether it is a record, a document or the value itself. */
+function referenceOf(field: ForeignKeyField, data: unknown): Value {
+  if (isValue(data)) return data as Value;
+  if (data instanceof Record) return runtimeOf(data).referenceValue(field);
+  const referenced = field.referencedField;
+  const value = (data as Document)[referenced.name];
+  return referenced instanceof ForeignKeyField ? referenceOf(referenced, value) : value as Value;
 }
 
 export function shouldSelectSeparately(
@@ -1999,7 +1980,7 @@ export function getUniqueFields(model: Model, row: Document) {
     for (const field of uniqueKey.fields) {
       const value = row[field.name];
       if (value instanceof Record) {
-        fields[field.name] = runtimeOf(value).primaryKey();
+        fields[field.name] = runtimeOf(value).referenceValue(field);
       } else {
         fields[field.name] = row[field.name] as Value;
       }

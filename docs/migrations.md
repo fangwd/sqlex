@@ -70,9 +70,12 @@ and other destructive differences are warnings and must be written explicitly.
 
 Adding a required column without a default also requires an explicit migration:
 add it as nullable, backfill existing rows, and then apply the desired
-constraint using operations appropriate for the database. Mutually cyclic new
-tables cannot be generated portably; create their tables and foreign-key
-constraints in an explicit dialect-aware migration.
+constraint using operations appropriate for the database. When new tables
+reference each other in a cycle, the foreign key closing the cycle is left out
+of its `createTable` and added with `addConstraint` once every table exists,
+which SQLite cannot do in place. Inserting rows into such a cycle still needs one
+of the foreign keys to be nullable: a flush writes that row without it first and
+fills the key in once the row it points at exists.
 
 ## Reconciling without migrations
 
@@ -164,7 +167,7 @@ raw SQL. Raw SQL always requires an explicit down operation.
 | Alter column in place | Yes | Yes | No; rebuild the table |
 | Add/drop constraints in place | Yes | Yes | No; rebuild the table |
 | Raw SQL defaults on added columns | Yes | Yes | Non-constant defaults require a rebuild |
-| Mutually cyclic new tables | Explicit migration | Explicit migration | Explicit migration |
+| Mutually cyclic new tables | Yes | Yes | No; explicit migration |
 | Baseline verification | Yes | Yes | Yes |
 
 PostgreSQL and SQLite run each migration transactionally. MySQL may implicitly

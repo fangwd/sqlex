@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.7.0]
+
+### Added
+
+- `field.foreignKey` accepts `references`, the name of a unique field on the
+  target to point at instead of its primary key. The column is named
+  `<field>_<referenced field>` and takes that field's type, and records,
+  filters, and writes resolve the parent by it.
+- Mutually cyclic new tables no longer need an explicit migration: `make` and
+  `reconcile` create the tables in dependency order and add the foreign key
+  that closes the cycle afterwards with `addConstraint`.
+
 ## [4.6.0]
 
 ### Added

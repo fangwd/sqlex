@@ -75,6 +75,11 @@ declare const fieldValue: unique symbol;
 
 export interface ForeignKeyOptions extends FieldOptions {
   relatedName?: string;
+  /**
+   * Field on the target the key points at. Defaults to the target's primary
+   * key; any other choice must be a `unique` field.
+   */
+  references?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;
 }
@@ -572,7 +577,7 @@ export class QuerySet<TClass extends RecordClass> {
     const row: Document = {};
     for (const [name, value] of Object.entries(data as { [key: string]: unknown })) {
       row[name] = value instanceof BaseRecord
-        ? runtimeOf(value).primaryKey()
+        ? runtimeOf(value).referenceValue(this.table.model.field(name))
         : (value as Document[string]);
     }
     return this.table.update(row, this.options.where as Document | undefined);
@@ -786,7 +791,7 @@ function tableFromRecord(
     }
     if (definition.kind === 'foreignKey') {
       const target = resolveForeignTarget(definition, recordClass, registered);
-      const targetKey = primaryField(target);
+      const targetKey = referencedField(target, definition);
       constraints.push({
         name: `${recordClass.definition.table}_${column.name}_fkey`,
         columns: [column.name],
@@ -836,7 +841,7 @@ function columnFromField(
       throw Error(`Cannot resolve foreign key field ${name}`);
     }
     const target = resolveForeignTarget(definition, owner, registered);
-    const [targetName, targetDefinition] = primaryField(target);
+    const [targetName, targetDefinition] = referencedField(target, definition);
     const targetColumn = columnFromField(
       targetName,
       targetDefinition,
@@ -904,9 +909,10 @@ function columnType(definition: ScalarFieldDefinition): string {
   }
 }
 
-function columnName(name: string, definition: AnyFieldDefinition): string {
-  return definition.options.column ||
-    (definition.kind === 'foreignKey' ? `${name}_id` : name);
+export function columnName(name: string, definition: AnyFieldDefinition): string {
+  if (definition.options.column) return definition.options.column;
+  if (definition.kind !== 'foreignKey') return name;
+  return `${name}_${definition.options.references ?? 'id'}`;
 }
 
 function fieldDefinition(
@@ -918,6 +924,23 @@ function fieldDefinition(
     throw Error(`${recordClass.definition.table}: unknown field ${fieldName}`);
   }
   return definition;
+}
+
+/** The target field a foreign key points at: its primary key unless `references` names a unique field. */
+function referencedField(
+  target: RecordClass,
+  definition: ForeignKeyDefinition
+): [string, AnyFieldDefinition] {
+  const name = definition.options.references;
+  if (!name) return primaryField(target);
+  const field = fieldDefinition(target, name);
+  if (!field.options.primaryKey && !field.options.unique) {
+    throw Error(
+      `${target.definition.table}.${name}: a foreign key can only reference ` +
+      'a primary key or unique field'
+    );
+  }
+  return [name, field];
 }
 
 function primaryField(recordClass: RecordClass): [string, AnyFieldDefinition] {

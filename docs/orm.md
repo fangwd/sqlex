@@ -57,7 +57,7 @@ Fields support `nullable`, `primaryKey`, `unique`, `generated`, `default`,
 | `field.vector()` | `number[]` | Requires `dimensions`; dense vector/embedding |
 | `field.uuid()` | `string` | Native or dialect-appropriate UUID storage |
 | `field.enum()` | Literal union | Requires `values`; accepts `typeName` |
-| `field.foreignKey()` | Target record | Accepts a record or primary key when writing |
+| `field.foreignKey()` | Target record | Accepts a record or the referenced key when writing |
 
 Every factory also accepts `comment`, and `defineRecord` a table-level
 `comment`. Both are compiled into the DDL on MySQL (inline) and PostgreSQL
@@ -172,6 +172,23 @@ export class Post extends defineRecord({
 
 Always use `declare` when adding field types to a record class body — an
 initialized class field is not model data, and its value is ignored.
+
+A foreign key points at the target's primary key unless `references` names
+another field, which must be `unique`. The column is named `<field>_<referenced
+field>` (`kind_code` below) unless `column` overrides it, takes the referenced
+field's type, and writes accept either a target record or the referenced value:
+
+```ts
+export class Material extends defineRecord({
+  table: 'material',
+  fields: {
+    id: field.id(),
+    kind: field.foreignKey(() => Kind, { references: 'code' }),
+  },
+}) {}
+
+await models.Material.create({ kind: 'tile' });
+```
 
 ### Composite primary keys
 
