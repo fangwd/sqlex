@@ -8,7 +8,7 @@ if (command === 'migration') {
   require('./sqlex-openapi').main(args).catch(fail);
 } else {
   fail(
-    'Usage: sqlex migration <make|sql|up|down|status|baseline>\n' +
+    'Usage: sqlex migration <make|sql|up|down|status|baseline|reconcile>\n' +
     '       sqlex openapi [--config <file>] [--out <file>]'
   );
 }

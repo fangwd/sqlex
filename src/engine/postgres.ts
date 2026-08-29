@@ -504,6 +504,7 @@ class SchemaBuilder {
           join pg_enum e on t.oid = e.enumtypid
           join pg_catalog.pg_namespace n ON n.oid = t.typnamespace
       where n.nspname NOT IN ('pg_catalog', 'information_schema')
+      order by t.typname, e.enumsortorder
     `)
     const result: { [key: string]: string[] } = {};
     for (const row of rows) {

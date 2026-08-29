@@ -228,6 +228,9 @@ class Builder {
 
         for (const constraintName in tableConstraintMap[tableName]) {
           const type = tableConstraintMap[tableName][constraintName];
+          // MySQL reports CHECK constraints in table_constraints but has no
+          // key_column_usage rows for them; sqlex only compares key constraints.
+          if (!/^(PRIMARY|UNIQUE|FOREIGN)/.test(type)) continue;
           const columns = tableConstraintColumnsMap[tableName][constraintName];
           const constraint: ConstraintInfo = {
             name: constraintName,

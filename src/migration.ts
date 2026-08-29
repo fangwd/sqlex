@@ -12,6 +12,7 @@ import {
   type Dialect,
   type DialectEncoder,
 } from './engine';
+import { queryInformationSchema } from './engine/util';
 import {
   type AnyFieldDefinition,
   type RecordClass,
@@ -56,6 +57,7 @@ export type MigrationOperation =
   | { kind: 'createTable'; table: MigrationTable }
   | { kind: 'dropTable'; table: string }
   | { kind: 'addColumn'; table: string; column: Column }
+  | { kind: 'alterColumn'; table: string; column: Column; from?: Column }
   | { kind: 'dropColumn'; table: string; column: string }
   | { kind: 'renameColumn'; table: string; from: string; to: string }
   | { kind: 'addConstraint'; table: string; constraint: MigrationConstraint }
@@ -99,6 +101,11 @@ export interface BaselineOptions extends Pick<MigrateOptions, 'target'> {
   force?: boolean;
 }
 
+export interface ReconcileOptions extends Pick<MigrateOptions, 'dryRun'> {
+  /** Also alter changed columns and drop undeclared ones. */
+  destructive?: boolean;
+}
+
 export interface MigrationResult {
   applied: string[];
   sql: string[];
@@ -128,6 +135,16 @@ export const operation = Object.freeze({
     table: string,
     column: Column
   ): MigrationOperation => ({ kind: 'addColumn', table, column }),
+  alterColumn: (
+    table: string,
+    column: Column,
+    from?: Column
+  ): MigrationOperation => ({
+    kind: 'alterColumn',
+    table,
+    column,
+    ...(from ? { from } : {}),
+  }),
   dropColumn: (table: string, column: string): MigrationOperation => ({
     kind: 'dropColumn',
     table,
@@ -283,8 +300,8 @@ export function diffMigrationSchemas(
           operations.push(operation.addColumn(table.name, column));
         }
       } else if (!sameSchemaValue(oldColumns.get(column.name), column)) {
-        warnings.push(
-          `${table.name}.${column.name} changed; add an explicit alter or raw SQL operation`
+        operations.push(
+          operation.alterColumn(table.name, column, oldColumns.get(column.name))
         );
       }
     }
@@ -336,6 +353,9 @@ export function invertOperations(
         return operation.dropTable(item.table.name);
       case 'addColumn':
         return operation.dropColumn(item.table, item.column.name);
+      case 'alterColumn':
+        if (!item.from) break;
+        return operation.alterColumn(item.table, item.from, item.column);
       case 'addConstraint':
         return operation.dropConstraint(item.table, item.constraint);
       case 'createIndex':
@@ -344,9 +364,8 @@ export function invertOperations(
         return operation.renameColumn(item.table, item.to, item.from);
       case 'sql':
         throw Error('Raw SQL operations require an explicit down migration');
-      default:
-        throw Error(`${item.kind} cannot be automatically reversed`);
     }
+    throw Error(`${item.kind} cannot be automatically reversed`);
   });
 }
 
@@ -384,6 +403,12 @@ export class MigrationCompiler {
           this.column(operation.column),
           ...this.columnComment(operation.table, operation.column),
         ];
+      case 'alterColumn':
+        return this.alterColumn(
+          operation.table,
+          operation.column,
+          operation.from
+        );
       case 'dropColumn':
         return [
           `alter table ${this.id(operation.table)} drop column ` +
@@ -474,6 +499,57 @@ export class MigrationCompiler {
       }
     }
     return statements;
+  }
+
+  private alterColumn(table: string, column: Column, from?: Column): string[] {
+    if (this.dialect === 'sqlite3') {
+      throw Error(
+        `SQLite cannot alter columns in place (${table}.${column.name}); ` +
+        'use a table rebuild or raw SQL migration'
+      );
+    }
+    if (
+      this.dialect === 'postgres' &&
+      from &&
+      Boolean(from.autoIncrement) !== Boolean(column.autoIncrement)
+    ) {
+      throw Error(
+        'PostgreSQL cannot change whether a column is generated in place ' +
+        `(${table}.${column.name}); write an explicit migration`
+      );
+    }
+    const prefix = `alter table ${this.id(table)} `;
+    if (this.dialect === 'mysql') {
+      return [`${prefix}modify column ${this.column(column)}`];
+    }
+    const name = this.id(column.name);
+    const type = this.type(column);
+    const nullable = column.nullable === true ? 'drop' : 'set';
+    const actions = [
+      `alter column ${name} type ${type} using ${name}::${type}`,
+      `alter column ${name} ${nullable} not null`,
+    ];
+    if (!column.autoIncrement) {
+      const defaultValue = this.defaultValue(column);
+      actions.push(
+        `alter column ${name} ` +
+        (defaultValue === undefined
+          ? 'drop default'
+          : `set default ${defaultValue}`)
+      );
+    }
+    const values = column.userDefinedType?.values;
+    if (column.type.toLowerCase() === 'enum' && values?.length) {
+      // Re-create the check that stands in for the enum; its name is what
+      // Postgres assigns to the inline check written by createTable.
+      const check = this.id(`${table}_${column.name}_check`);
+      actions.push(
+        `drop constraint if exists ${check}`,
+        `add constraint ${check} check (${name} in (` +
+        values.map(value => this.encoder.escape(value)).join(', ') + '))'
+      );
+    }
+    return [prefix + actions.join(', '), ...this.columnComment(table, column)];
   }
 
   private columnComment(table: string, column: Column): string[] {
@@ -902,6 +978,52 @@ export class MigrationRunner {
     }
   }
 
+  /**
+   * Bring the live database up to the record declarations. Missing tables,
+   * columns, constraints, and indexes are created; with `destructive`,
+   * changed columns are altered and undeclared columns dropped. Anything
+   * else is reported in one error before any DDL runs. Returns the SQL that
+   * was (or, with `dryRun`, would be) executed.
+   */
+  async reconcile(
+    classes: RecordClassMap,
+    options: ReconcileOptions = {}
+  ): Promise<string[]> {
+    const expected = migrationSchemaFromRecords(classes);
+    const schemaName = expected.name || undefined;
+    const connection = await this.db.pool.getConnection();
+    let locked = false;
+    try {
+      if (!options.dryRun) {
+        await this.acquireLock(connection);
+        locked = true;
+      }
+      const live = await getInformationSchema(
+        connection,
+        this.db.name,
+        schemaName
+      );
+      const indexes = await getIndexNames(connection, this.db.name, schemaName);
+      const sql = reconcileOperations(
+        live,
+        indexes,
+        expected,
+        connection.dialect,
+        Boolean(options.destructive)
+      ).flatMap(operation => this.compiler.compile(operation));
+      if (!options.dryRun && sql.length) {
+        await connection.transaction(async () => {
+          for (const statement of sql) {
+            await connection._query(statement);
+          }
+        });
+      }
+      return sql;
+    } finally {
+      await this.releaseConnection(connection, locked);
+    }
+  }
+
   private async ensureTable(connection: Connection): Promise<void> {
     const timestamp = connection.dialect === 'sqlite3'
       ? 'text'
@@ -1224,43 +1346,15 @@ function assertSchemaCompatible(
       const actualColumn = actualColumns.get(column.name);
       if (!actualColumn) {
         differences.push(`missing column ${table.name}.${column.name}`);
-      } else if (
-        normalizeColumnType(actualColumn.type, dialect) !==
-        normalizeColumnType(column.type, dialect)
-      ) {
-        differences.push(
-          `column ${table.name}.${column.name} has type ` +
-          `${actualColumn.type}, expected ${column.type}`
-        );
-      } else if (
-        Boolean(actualColumn.nullable) !== Boolean(column.nullable)
-      ) {
-        differences.push(
-          `column ${table.name}.${column.name} is ` +
-          `${actualColumn.nullable ? 'nullable' : 'required'}, expected ` +
-          `${column.nullable ? 'nullable' : 'required'}`
-        );
-      } else if (
-        Boolean(actualColumn.autoIncrement) !== Boolean(column.autoIncrement)
-      ) {
-        differences.push(
-          `column ${table.name}.${column.name} ` +
-          `${actualColumn.autoIncrement ? 'is' : 'is not'} auto-incrementing, ` +
-          `expected ${column.autoIncrement ? 'auto-incrementing' : 'a supplied value'}`
-        );
-      } else if (!sameColumnDimensions(actualColumn, column, dialect)) {
-        differences.push(
-          `column ${table.name}.${column.name} has dimensions ` +
-          `${formatColumnDimensions(actualColumn)}, expected ` +
-          formatColumnDimensions(column)
-        );
-      } else if (!sameColumnDefault(actualColumn, column)) {
-        differences.push(
-          `column ${table.name}.${column.name} has default ` +
-          `${formatDefault(actualColumn.default)}, expected ` +
-          formatDefault(column.defaultSql ?? column.default)
-        );
+        continue;
       }
+      const difference = columnDifference(
+        actualColumn,
+        column,
+        table.name,
+        dialect
+      );
+      if (difference) differences.push(difference);
     }
     for (const constraint of table.constraints) {
       const found = actual.constraints.some(candidate =>
@@ -1279,6 +1373,196 @@ function assertSchemaCompatible(
       differences.map(item => `- ${item}`).join('\n')
     );
   }
+}
+
+function reconcileOperations(
+  live: DatabaseDefinition,
+  liveIndexes: ReadonlySet<string>,
+  expected: MigrationSchema,
+  dialect: Dialect,
+  destructive: boolean
+): MigrationOperation[] {
+  const liveTables = new Map(live.tables.map(table => [table.name, table]));
+  const problems: string[] = [];
+  const created: MigrationOperation[] = [];
+  // Stale constraints go before column changes so a dropped column is not
+  // still referenced; new constraints and indexes go after so their columns
+  // exist. Foreign keys are dropped before other constraints because they
+  // depend on the unique keys being removed.
+  const droppedForeign: MigrationOperation[] = [];
+  const dropped: MigrationOperation[] = [];
+  const changed: MigrationOperation[] = [];
+  const added: MigrationOperation[] = [];
+
+  const newTables = expected.tables.filter(
+    table => !liveTables.has(table.name)
+  );
+  for (const table of sortTablesByReferences(newTables)) {
+    created.push(operation.createTable(table));
+    for (const index of table.indexes) {
+      created.push(operation.createIndex(table.name, index));
+    }
+  }
+
+  for (const table of expected.tables) {
+    const actual = liveTables.get(table.name);
+    if (!actual) continue;
+    const actualColumns = new Map(
+      actual.columns.map(column => [column.name, column])
+    );
+    const declared = new Set(table.columns.map(column => column.name));
+
+    for (const column of table.columns) {
+      const actualColumn = actualColumns.get(column.name);
+      if (!actualColumn) {
+        if (column.nullable === true || hasUsableColumnDefault(column)) {
+          changed.push(operation.addColumn(table.name, column));
+        } else {
+          problems.push(
+            `missing column ${table.name}.${column.name} is required ` +
+            'and has no default'
+          );
+        }
+        continue;
+      }
+      const difference = columnDifference(
+        actualColumn,
+        column,
+        table.name,
+        dialect
+      );
+      if (!difference) continue;
+      // PostgreSQL cannot attach or detach a sequence through alterColumn.
+      const generationChanged = dialect === 'postgres' &&
+        Boolean(actualColumn.autoIncrement) !== Boolean(column.autoIncrement);
+      if (destructive && !generationChanged) {
+        changed.push(operation.alterColumn(table.name, column));
+      } else {
+        problems.push(difference);
+      }
+    }
+    for (const column of actual.columns) {
+      if (declared.has(column.name)) continue;
+      if (destructive) {
+        changed.push(operation.dropColumn(table.name, column.name));
+      } else {
+        problems.push(`column ${table.name}.${column.name} is not declared`);
+      }
+    }
+
+    for (const constraint of actual.constraints) {
+      const isDeclared =
+        table.constraints.some(item => sameConstraintShape(constraint, item)) ||
+        // MySQL and SQLite report unique indexes as constraints.
+        (Boolean(constraint.unique) && table.indexes.some(index =>
+          index.unique && sameSchemaValue(index.columns, constraint.columns)
+        ));
+      if (isDeclared) continue;
+      if (destructive && constraint.name && dialect !== 'sqlite3') {
+        const drop = operation.dropConstraint(table.name, constraint);
+        if (constraint.references) {
+          droppedForeign.push(drop);
+        } else {
+          dropped.push(drop);
+        }
+      } else {
+        problems.push(
+          `constraint ${table.name}.` +
+          `${constraint.name || constraintKey(constraint)} is not declared`
+        );
+      }
+    }
+    for (const constraint of table.constraints) {
+      const found = actual.constraints.some(candidate =>
+        sameConstraintShape(candidate, constraint)
+      );
+      if (!found) {
+        added.push(operation.addConstraint(table.name, constraint));
+      }
+    }
+    for (const index of table.indexes) {
+      if (!liveIndexes.has(`${table.name}.${index.name}`)) {
+        added.push(operation.createIndex(table.name, index));
+      }
+    }
+  }
+
+  if (problems.length) {
+    throw Error(
+      'Schema cannot be reconciled automatically:\n' +
+      problems.map(item => `- ${item}`).join('\n')
+    );
+  }
+  return [...created, ...droppedForeign, ...dropped, ...changed, ...added];
+}
+
+// Every live index as `table.index`, including those backing unique and
+// primary key constraints.
+async function getIndexNames(
+  connection: Connection,
+  catalogName: string,
+  schemaName?: string
+): Promise<Set<string>> {
+  const sql = connection.dialect === 'postgres'
+    ? 'select tablename as table_name, indexname as index_name ' +
+      'from pg_indexes where schemaname = ' +
+      connection.escape(schemaName || 'public')
+    : connection.dialect === 'mysql'
+      ? 'select table_name as table_name, index_name as index_name ' +
+        'from information_schema.statistics ' +
+        `where table_schema = ${connection.escape(catalogName)}`
+      : 'select tbl_name as table_name, name as index_name ' +
+        "from sqlite_master where type = 'index'";
+  const rows = await queryInformationSchema<{
+    table_name: string;
+    index_name: string;
+  }>(connection, sql);
+  return new Set(rows.map(row => `${row.table_name}.${row.index_name}`));
+}
+
+function columnDifference(
+  actual: Column,
+  expected: Column,
+  table: string,
+  dialect: Dialect
+): string | undefined {
+  const label = `column ${table}.${expected.name}`;
+  // A native PostgreSQL enum introspects as varchar with its type attached.
+  const actualType =
+    actual.userDefinedType?.type === 'enum' ? 'enum' : actual.type;
+  if (
+    normalizeColumnType(actualType, dialect) !==
+    normalizeColumnType(expected.type, dialect)
+  ) {
+    return `${label} has type ${actual.type}, expected ${expected.type}`;
+  }
+  const actualValues = actual.userDefinedType?.values;
+  const expectedValues = expected.userDefinedType?.values;
+  if (
+    actualValues && expectedValues &&
+    !sameSchemaValue(actualValues, expectedValues)
+  ) {
+    return `${label} has values ${JSON.stringify(actualValues)}, ` +
+      `expected ${JSON.stringify(expectedValues)}`;
+  }
+  if (Boolean(actual.nullable) !== Boolean(expected.nullable)) {
+    return `${label} is ${actual.nullable ? 'nullable' : 'required'}, ` +
+      `expected ${expected.nullable ? 'nullable' : 'required'}`;
+  }
+  if (Boolean(actual.autoIncrement) !== Boolean(expected.autoIncrement)) {
+    return `${label} ${actual.autoIncrement ? 'is' : 'is not'} ` +
+      'auto-incrementing, expected ' +
+      (expected.autoIncrement ? 'auto-incrementing' : 'a supplied value');
+  }
+  if (!sameColumnDimensions(actual, expected, dialect)) {
+    return `${label} has dimensions ${formatColumnDimensions(actual)}, ` +
+      `expected ${formatColumnDimensions(expected)}`;
+  }
+  if (!sameColumnDefault(actual, expected)) {
+    return `${label} has default ${formatDefault(actual.default)}, ` +
+      `expected ${formatDefault(expected.defaultSql ?? expected.default)}`;
+  }
+  return undefined;
 }
 
 function normalizeColumnType(type: string, dialect: Dialect): string {

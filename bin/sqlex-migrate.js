@@ -82,6 +82,15 @@ async function main(argv = process.argv.slice(2)) {
       for (const id of result.applied) process.stdout.write(`baselined ${id}\n`);
     } else if (command === 'sql') {
       printStatements(runner.plan(migrations, { target: parsed.target }), true);
+    } else if (command === 'reconcile') {
+      if (!config.models) {
+        throw Error(`${configPath} must export a models object`);
+      }
+      const sql = await runner.reconcile(config.models, {
+        dryRun: parsed.dryRun,
+        destructive: parsed.destructive,
+      });
+      printStatements(sql, true);
     } else {
       throw Error(`Unknown migration command: ${command}`);
     }
@@ -98,6 +107,8 @@ function parseArgs(argv) {
       result.dryRun = true;
     } else if (arg === '--force') {
       result.force = true;
+    } else if (arg === '--destructive') {
+      result.destructive = true;
     } else if (arg === '--config') {
       result.config = argv[++index];
     } else if (arg === '--target') {

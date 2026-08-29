@@ -105,6 +105,7 @@ export type {
   MigrationSchema,
   MigrationStatus,
   MigrationTable,
+  ReconcileOptions,
 } from './migration';
 export type {
   BoundModel,

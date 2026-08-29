@@ -611,6 +611,110 @@ test('baseline rejects changed defaults and referential actions', async () => {
   }
 });
 
+test('reconcile applies additive changes and reports the rest', async () => {
+  class Author extends defineRecord({
+    table: 'reconcile_author',
+    fields: {
+      id: field.id(),
+      name: field.string({ maxLength: 100 }),
+    },
+  }) {}
+  class AuthorV2 extends defineRecord({
+    table: 'reconcile_author',
+    fields: {
+      id: field.id(),
+      name: field.string({ maxLength: 100, index: true }),
+      bio: field.text({ nullable: true }),
+      active: field.boolean({ default: true }),
+    },
+  }) {}
+  class Book extends defineRecord({
+    table: 'reconcile_book',
+    fields: {
+      id: field.id(),
+      author: field.foreignKey(() => AuthorV2),
+      title: field.string({ maxLength: 200 }),
+    },
+  }) {}
+  class AuthorV3 extends defineRecord({
+    table: 'reconcile_author',
+    fields: {
+      id: field.id(),
+      name: field.string({ maxLength: 50, index: true }),
+      active: field.boolean({ default: true }),
+      rating: field.integer(),
+    },
+  }) {}
+  class AuthorV4 extends defineRecord({
+    table: 'reconcile_author',
+    fields: {
+      id: field.id(),
+      name: field.string({ maxLength: 50, index: true, nullable: true }),
+      active: field.boolean({ default: false }),
+    },
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+
+  try {
+    const created = await runner.reconcile({ Author });
+    expect(created.join('\n')).toContain('create table');
+    expect(await runner.reconcile({ Author })).toEqual([]);
+
+    const planned = await runner.reconcile(
+      { Author: AuthorV2, Book },
+      { dryRun: true }
+    );
+    expect(planned.join('\n')).toContain('add column');
+    expect(planned.join('\n')).toContain('create index');
+    expect(planned.join('\n')).toContain('create table');
+    expect(await runner.reconcile({ Author })).toEqual([]);
+
+    expect(await runner.reconcile({ Author: AuthorV2, Book })).toEqual(planned);
+    expect(await runner.reconcile({ Author: AuthorV2, Book })).toEqual([]);
+
+    const models = db.bind({ Author: AuthorV2, Book });
+    const author = await models.Author.objects.create({ name: 'Ann' });
+    expect(author.active).toBe(true);
+    expect(author.bio).toBeNull();
+    const book = await models.Book.objects.create({ author, title: 'Ants' });
+    expect(book.id).toBeGreaterThan(0);
+
+    let message = '';
+    try {
+      await runner.reconcile({ Author: AuthorV3, Book });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain('cannot be reconciled automatically');
+    expect(message).toContain(
+      'missing column reconcile_author.rating is required and has no default'
+    );
+    expect(message).toContain('column reconcile_author.name has dimensions');
+    expect(message).toContain('column reconcile_author.bio is not declared');
+    expect(await runner.reconcile({ Author: AuthorV2, Book })).toEqual([]);
+
+    // destructive: alter changed columns and drop undeclared ones
+    const destructive = { destructive: true };
+    if (helper.isSqlite3(db.pool.dialect)) {
+      await expect(runner.reconcile({ Author: AuthorV4, Book }, destructive))
+        .rejects.toThrow('SQLite cannot alter columns');
+      return;
+    }
+    const altered = await runner.reconcile({ Author: AuthorV4, Book }, destructive);
+    expect(altered.join('\n')).toMatch(/alter column|modify column/);
+    expect(altered.join('\n')).toContain('drop column');
+    expect(await runner.reconcile({ Author: AuthorV4, Book })).toEqual([]);
+    const rows = await db.query('select * from reconcile_author');
+    expect(rows[0]).not.toHaveProperty('bio');
+    expect(rows[0].name).toBe('Ann');
+  } finally {
+    await db.query('drop table if exists reconcile_book');
+    await db.query('drop table if exists reconcile_author');
+    await db.end();
+  }
+});
+
 test('a decimal keeps its precision and scale in the derived schema', () => {
   class Invoice extends defineRecord({
     table: 'orm_invoice',
@@ -657,6 +761,267 @@ test('a decimal keeps its precision and scale in the derived schema', () => {
   expect(snapshot.tables[0].columns.find(column => column.name === 'total')).toEqual(
     expect.objectContaining({ precision: 12, scale: 2 })
   );
+});
+
+test('reconcile reports undeclared constraints and drops them destructively', async () => {
+  class Tag extends defineRecord({
+    table: 'reconcile_tag',
+    fields: {
+      id: field.id(),
+      code: field.string({ maxLength: 20, unique: true }),
+    },
+  }) {}
+  class TagV2 extends defineRecord({
+    table: 'reconcile_tag',
+    fields: {
+      id: field.id(),
+      code: field.string({ maxLength: 20 }),
+    },
+  }) {}
+  class TagV3 extends defineRecord({
+    table: 'reconcile_tag',
+    fields: {
+      id: field.id(),
+      code: field.string({ maxLength: 20 }),
+    },
+    indexes: [{ fields: ['code'], unique: true }],
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  const destructive = { destructive: true };
+
+  try {
+    await runner.reconcile({ Tag });
+    await expect(runner.reconcile({ Tag: TagV2 }))
+      .rejects.toThrow(/constraint reconcile_tag\..* is not declared/);
+    if (helper.isSqlite3(db.pool.dialect)) {
+      await expect(runner.reconcile({ Tag: TagV2 }, destructive))
+        .rejects.toThrow('is not declared');
+      return;
+    }
+    const sql = await runner.reconcile({ Tag: TagV2 }, destructive);
+    expect(sql.join('\n')).toMatch(/drop (constraint|index)/);
+    expect(await runner.reconcile({ Tag: TagV2 })).toEqual([]);
+
+    // a declared unique index is not mistaken for an undeclared constraint
+    expect((await runner.reconcile({ Tag: TagV3 })).join('\n'))
+      .toContain('create unique index');
+    expect(await runner.reconcile({ Tag: TagV3 })).toEqual([]);
+  } finally {
+    await db.query('drop table if exists reconcile_tag');
+    await db.end();
+  }
+});
+
+test('destructive reconcile converges or reports, never loops', async () => {
+  class Plain extends defineRecord({
+    table: 'reconcile_plain',
+    fields: {
+      id: field.id(),
+      name: field.string({ maxLength: 100 }),
+    },
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  await db.query(
+    'create table reconcile_plain ' +
+    '(id integer not null primary key, name varchar(100) not null)'
+  );
+  try {
+    if (db.pool.dialect === 'postgres') {
+      await expect(runner.reconcile({ Plain }, { destructive: true }))
+        .rejects.toThrow('is not auto-incrementing');
+      return;
+    }
+    await runner.reconcile({ Plain }, { destructive: true });
+    expect(await runner.reconcile({ Plain })).toEqual([]);
+  } finally {
+    await db.query('drop table reconcile_plain');
+    await db.end();
+  }
+});
+
+test('reconcile accepts a native PostgreSQL enum and compares its values', async () => {
+  const db = helper.connectToDatabase(NAME) as Database;
+  if (db.pool.dialect !== 'postgres') {
+    await db.end();
+    return;
+  }
+  class Native extends defineRecord({
+    table: 'reconcile_native',
+    fields: {
+      id: field.id(),
+      level: field.enum({ values: ['low', 'high'], default: 'low' }),
+    },
+  }) {}
+  class NativeV2 extends defineRecord({
+    table: 'reconcile_native',
+    fields: {
+      id: field.id(),
+      level: field.enum({ values: ['low', 'high', 'urgent'], default: 'low' }),
+    },
+  }) {}
+  const runner = new MigrationRunner(db);
+  await db.query("create type reconcile_level as enum ('low', 'high')");
+  await db.query(
+    'create table reconcile_native (id serial primary key, ' +
+    "level reconcile_level not null default 'low')"
+  );
+  try {
+    expect(await runner.reconcile({ Native })).toEqual([]);
+    await expect(runner.reconcile({ Native: NativeV2 }))
+      .rejects.toThrow('column reconcile_native.level has values');
+    await runner.reconcile({ Native: NativeV2 }, { destructive: true });
+    expect(await runner.reconcile({ Native: NativeV2 })).toEqual([]);
+  } finally {
+    await db.query('drop table reconcile_native');
+    await db.query('drop type reconcile_level');
+    await db.end();
+  }
+});
+
+test('reconcile reads a MySQL schema that has check constraints', async () => {
+  class Scored extends defineRecord({
+    table: 'reconcile_scored',
+    fields: {
+      id: field.id(),
+      score: field.integer(),
+    },
+    checks: [
+      { name: 'reconcile_scored_range', expression: 'score >= 0 and score <= 10' },
+    ],
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  try {
+    expect((await runner.reconcile({ Scored })).join('\n'))
+      .toContain('check (score >= 0 and score <= 10)');
+    expect(await runner.reconcile({ Scored })).toEqual([]);
+    expect(await runner.reconcile({ Scored }, { destructive: true }))
+      .toEqual([]);
+  } finally {
+    await db.query('drop table reconcile_scored');
+    await db.end();
+  }
+});
+
+test('destructive reconcile drops a stale foreign key before its unique key', async () => {
+  class Publisher extends defineRecord({
+    table: 'reconcile_publisher',
+    fields: {
+      id: field.id(),
+      code: field.string({ maxLength: 10 }),
+    },
+  }) {}
+  class Edition extends defineRecord({
+    table: 'reconcile_edition',
+    fields: {
+      id: field.id(),
+      publisherCode: field.string({ maxLength: 10, column: 'publisher_code' }),
+    },
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  const keyColumn = db.pool.dialect === 'postgres'
+    ? 'id serial primary key'
+    : db.pool.dialect === 'mysql'
+      ? 'id integer not null auto_increment primary key'
+      : 'id integer primary key';
+  try {
+    await db.query(
+      'create table reconcile_publisher (' + keyColumn + ', ' +
+      'code varchar(10) not null, ' +
+      'constraint reconcile_publisher_code_key unique (code))'
+    );
+    await db.query(
+      'create table reconcile_edition (' + keyColumn + ', ' +
+      'publisher_code varchar(10) not null, ' +
+      'constraint reconcile_edition_publisher_fkey ' +
+      'foreign key (publisher_code) references reconcile_publisher (code))'
+    );
+    const destructive = { destructive: true };
+    if (helper.isSqlite3(db.pool.dialect)) {
+      await expect(
+        runner.reconcile({ Publisher, Edition }, destructive)
+      ).rejects.toThrow('is not declared');
+      return;
+    }
+    const sql = await runner.reconcile({ Publisher, Edition }, destructive);
+    const statements = sql.join('\n');
+    expect(statements).toMatch(/drop (constraint|index|foreign key)/);
+    expect(statements.indexOf('reconcile_edition_publisher_fkey'))
+      .toBeLessThan(statements.indexOf('reconcile_publisher_code_key'));
+    expect(await runner.reconcile({ Publisher, Edition })).toEqual([]);
+  } finally {
+    await db.query('drop table if exists reconcile_edition');
+    await db.query('drop table if exists reconcile_publisher');
+    await db.end();
+  }
+});
+
+test('make generates alterColumn for changed columns', () => {
+  const encoder = (dialect: 'postgres' | 'mysql' | 'sqlite3') => ({
+    dialect,
+    escape: (value: string) => `'${value.replace(/'/g, "''")}'`,
+    escapeId: (value: string) =>
+      dialect === 'mysql' ? `\`${value}\`` : `"${value}"`,
+    escapeDate: (value: Date) => `'${value.toISOString()}'`,
+  });
+  class Widget extends defineRecord({
+    table: 'orm_widget',
+    fields: {
+      id: field.id(),
+      label: field.string({ maxLength: 50 }),
+    },
+  }) {}
+  class WidgetV2 extends defineRecord({
+    table: 'orm_widget',
+    fields: {
+      id: field.id(),
+      label: field.text({ nullable: true, default: 'none' }),
+    },
+  }) {}
+  const initial = makeMigration('0001_widget', { Widget }).migration;
+  const changed = makeMigration('0002_widget', { Widget: WidgetV2 }, initial);
+  expect(changed.warnings).toEqual([]);
+  const [alter] = changed.migration.up;
+  expect(alter).toEqual(expect.objectContaining({
+    kind: 'alterColumn',
+    table: 'orm_widget',
+    column: expect.objectContaining({ name: 'label', type: 'text' }),
+    from: expect.objectContaining({ name: 'label', type: 'varchar' }),
+  }));
+  expect(changed.migration.down[0]).toEqual(expect.objectContaining({
+    kind: 'alterColumn',
+    column: expect.objectContaining({ type: 'varchar', size: 50 }),
+  }));
+
+  expect(new MigrationCompiler('postgres', encoder('postgres')).compile(alter))
+    .toEqual([
+      'alter table "orm_widget" ' +
+      'alter column "label" type text using "label"::text, ' +
+      'alter column "label" drop not null, ' +
+      "alter column \"label\" set default 'none'",
+    ]);
+  expect(new MigrationCompiler('mysql', encoder('mysql')).compile(alter))
+    .toEqual(["alter table `orm_widget` modify column `label` text default 'none'"]);
+  expect(() => new MigrationCompiler('sqlite3', encoder('sqlite3')).compile(alter))
+    .toThrow('SQLite cannot alter columns');
+
+  // Postgres stores an enum as text plus a check; widening it rewrites the check
+  const enumAlter = operation.alterColumn('orm_widget', {
+    name: 'level',
+    type: 'enum',
+    userDefinedType: { type: 'enum', name: 'level', values: ['low', 'high'] },
+  });
+  expect(new MigrationCompiler('postgres', encoder('postgres')).compile(enumAlter)[0])
+    .toContain(
+      'drop constraint if exists "orm_widget_level_check", ' +
+      'add constraint "orm_widget_level_check" ' +
+      'check ("level" in (\'low\', \'high\'))'
+    );
+  expect(new MigrationCompiler('mysql', encoder('mysql')).compile(enumAlter))
+    .toEqual(["alter table `orm_widget` modify column `level` enum('low','high') not null"]);
 });
 
 test('dialect compilers emit engine-specific DDL', () => {

@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.6.0]
+
+### Added
+
+- `MigrationRunner.reconcile` applies the additive DDL needed to bring a live
+  database up to the record declarations, and reports any difference that
+  cannot be reconciled automatically before running anything. With
+  `destructive: true` it also alters changed columns and drops undeclared ones.
+  `sqlex migration reconcile [--dry-run] [--destructive]` runs it from the
+  config file.
+- `operation.alterColumn` changes a column's type, nullability, or default on
+  PostgreSQL and MySQL; `make` now generates it for changed columns instead of
+  warning.
+
 ## [4.5.1]
 
 ### Added
