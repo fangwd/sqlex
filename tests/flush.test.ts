@@ -509,6 +509,41 @@ test('replaceRecordsIn (1)', async() => {
   await db.end();
 });
 
+test('replaceRecordsIn with replaceRoots', async() => {
+  const db = helper.connectToDatabase(NAME);
+
+  const user = db.append('user', { email: 'carol' });
+
+  for (const code of ['carol-c1', 'carol-c2']) {
+    const order = db.table('order').append({ code, user });
+    for (let j = 1; j <= 3; j++) {
+      db.table('order_item').append({ order, product: j, quantity: j });
+    }
+  }
+
+  await db.flush();
+
+  db.clear();
+
+  const order = db.table('order').append({ code: 'carol-c1', user });
+  db.table('order_item').append({ order, product: 1, quantity: 9 });
+  db.table('order').append({ code: 'carol-c2', user });
+
+  await db.flush({
+    replaceRecordsIn: ['order', 'order_item'],
+    replaceRoots: [order],
+  });
+
+  const count = async (code: string) =>
+    (await db.table('order_item').select('*', { where: { order: { code } } }))
+      .length;
+
+  expect(await count('carol-c1')).toBe(1);
+  expect(await count('carol-c2')).toBe(3);
+
+  await db.end();
+});
+
 test('replaceRecordsIn (2)', async() => {
   const db = helper.connectToDatabase(NAME);
 

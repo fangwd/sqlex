@@ -101,6 +101,18 @@ This correctly handles self-referential tables (such as a `comment.parent_id`
 hierarchy) by deleting obsolete rows leaf-first rather than relying on database
 cascades.
 
+By default every record appended to the first table is a root whose children get
+replaced. When the same flush also carries records you only want to upsert —
+say, orders referenced from elsewhere without their items — pass `replaceRoots`
+to limit the replacement to specific records:
+
+```js
+await db.flush({
+  replaceRecordsIn: ['order', 'order_item'],
+  replaceRoots: [order],
+});
+```
+
 ## Flush hooks
 
 `flush` accepts `afterBegin` and `beforeCommit` callbacks to run extra work inside

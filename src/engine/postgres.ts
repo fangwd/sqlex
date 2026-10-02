@@ -85,6 +85,8 @@ export class _Connection extends Connection {
   dialect: Dialect = 'postgres';
   connection: Client | PoolClient;
   queryCounter: QueryCounter = new QueryCounter();
+  // pg deprecates overlapping client.query() calls, so queries run one at a time.
+  private pending: Promise<unknown> = Promise.resolve();
 
   constructor(options: ClientConfig | PoolClient, connected?: string) {
     super();
@@ -93,8 +95,9 @@ export class _Connection extends Connection {
       this.database = connected;
     } else {
       const config = options as ClientConfig;
-      this.connection = new Client(config);
-      this.connection.connect();
+      const client = new Client(config);
+      this.connection = client;
+      this.pending = client.connect();
       this.database = config.database as string;
     }
   }
@@ -112,8 +115,10 @@ export class _Connection extends Connection {
       sql = `${sql} returning ${this.escapeId(pk)}`;
     }
     logger.debug(sql);
-    return this.connection
-      .query(sql)
+    const run = () => this.connection.query(sql);
+    const pending = this.pending.then(run, run);
+    this.pending = pending.catch(() => undefined);
+    return pending
       .then(result => {
         switch (result.command) {
           case 'SELECT':
@@ -306,6 +311,7 @@ class SchemaBuilder {
       column_name: string;
       ordinal_position: number;
       column_default: string | null;
+      is_identity: string;
       is_nullable: string;
       data_type: string;
       character_maximum_length: number | null;
@@ -316,7 +322,7 @@ class SchemaBuilder {
       column_comment: string | null;
     }>(this.connection, `
       select table_name, column_name, ordinal_position, column_default,
-      is_nullable, data_type, character_maximum_length, numeric_precision,
+      is_identity, is_nullable, data_type, character_maximum_length, numeric_precision,
       numeric_scale, udt_name,
       case when udt_name = 'vector' then (
         select a.atttypmod
@@ -382,7 +388,7 @@ class SchemaBuilder {
         }
       }
       else if (/^(big)?(int|long)/i.test(columnInfo.type)) {
-        if (row.column_default && /^nextval\(/i.exec(row.column_default)) {
+        if (row.is_identity === 'YES' || (row.column_default && /^nextval\(/i.exec(row.column_default))) {
           columnInfo.autoIncrement = true;
         }
       }

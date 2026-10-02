@@ -63,3 +63,42 @@ test('raw query() returns rows for INSERT ... RETURNING', async () => {
     await helper.dropDatabase(NAME);
   }
 });
+
+test('overlapping queries on one connection run one at a time', async () => {
+  if (helper.DB_TYPE !== 'postgres') {
+    return;
+  }
+  await helper.createDatabase(NAME);
+  const db = helper.connectToDatabase(NAME);
+  try {
+    const connection = await db.pool.getConnection();
+    // pg deprecates calling client.query() while another query is running
+    const client = (connection as any).connection;
+    const query = client.query.bind(client);
+    let running = 0;
+    let maxRunning = 0;
+    client.query = (sql: string) => {
+      maxRunning = Math.max(maxRunning, ++running);
+      return query(sql).finally(() => running--);
+    };
+    try {
+      const results = await Promise.all(
+        [1, 2, 3].map(n => connection.query(`select ${n} as n`))
+      );
+      expect(results.map(rows => rows[0].n)).toEqual([1, 2, 3]);
+      // a failed query does not block the ones queued after it
+      const [failed, next] = await Promise.allSettled([
+        connection.query('select * from missing_table'),
+        connection.query('select 4 as n'),
+      ]);
+      expect(failed.status).toBe('rejected');
+      expect(next).toEqual({ status: 'fulfilled', value: [{ n: 4 }] });
+      expect(maxRunning).toBe(1);
+    } finally {
+      connection.release();
+    }
+  } finally {
+    await db.end();
+    await helper.dropDatabase(NAME);
+  }
+});

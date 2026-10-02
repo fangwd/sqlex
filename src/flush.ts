@@ -355,7 +355,19 @@ function _flushTable(
     return Promise.all(promises).then(results => {
       let i = 0;
       for (const entry of nameMap.values()) {
-        let id = results[i++];
+        const result = results[i++];
+        if (Array.isArray(result)) {
+          entry.records.forEach((record, j) => {
+            if (model.primaryKey.autoIncrement()) {
+              runtimeOf(record).setPrimaryKey(result[j]);
+            }
+            runtimeOf(record).state.selected = true;
+            runtimeOf(record).state.method = FlushMethod.UPDATE;
+            runtimeOf(record).inserted = true;
+          });
+          continue;
+        }
+        let id = result as number;
         if (connection.dialect === 'sqlite3' || connection.dialect === 'generic') {
           // sqlite3 returns the "last" inserted id
           for (let j = entry.records.length - 1; j >= 0; j--) {
@@ -497,6 +509,8 @@ export interface FlushOptions {
   afterBegin?: (c: Connection) => Promise<any>;
   beforeCommit?: (c: Connection) => Promise<any>;
   replaceRecordsIn?: string[];
+  /** Limits replaceRecordsIn to these root records (default: all of them). */
+  replaceRoots?: Record[];
   allowPartial?: boolean;
 }
 
@@ -518,16 +532,15 @@ export function flushDatabase(
           .then(() =>
             (perfect ? flushDatabaseA(connection, db) : Promise.resolve()).then(
               () =>
-                flushDatabaseB(connection, db, allowPartial ?? false).then((complete) => {
-                  const replace = options.replaceRecordsIn
-                    ? replaceRecordsIn(connection, db, options.replaceRecordsIn)
-                    : Promise.resolve();
-                  replace.then(() =>
-                    beforeCommit(connection).then(() =>
-                      connection.commit().then(() => resolve(complete))
-                    )
-                  );
-                })
+                flushDatabaseB(connection, db, allowPartial ?? false).then((complete) =>
+                  (options.replaceRecordsIn
+                    ? replaceRecordsIn(connection, db, options.replaceRecordsIn, options.replaceRoots)
+                    : Promise.resolve()
+                  )
+                    .then(() => beforeCommit(connection))
+                    .then(() => connection.commit())
+                    .then(() => resolve(complete))
+                )
             )
           )
           .catch((error: unknown) => {
@@ -592,7 +605,7 @@ export function _insertRecords(
   table: Table,
   names: string[],
   records: Record[]
-): Promise<number> {
+): Promise<Value | Value[]> {
   const escape = table.db.pool.escapeId;
   const model = table.model;
 
@@ -612,7 +625,15 @@ export function _insertRecords(
 
   const into = escape(table.name);
   const query = `insert into ${into} (${columns}) values ${values.join(',')}`;
-  return connection._query(query, table.model.keyField()!.column.name);
+  const pk = table.model.keyField()!.column.name;
+  if (connection.dialect === 'postgres') {
+    // Sequence values of concurrent inserts can interleave, so read every id
+    // instead of assuming they are consecutive.
+    return connection
+      ._query(`${query} returning ${escape(pk)}`)
+      .then((rows: Row[]) => rows.map(row => row[pk] as Value));
+  }
+  return connection._query(query, pk);
 }
 
 export async function replaceRecord(
@@ -733,13 +754,14 @@ async function _buildMapTable(
 async function replaceRecordsIn(
   connection: Connection,
   db: Database,
-  names: string[]
+  names: string[],
+  roots?: Record[]
 ) {
   if (names.length === 0) return;
 
   const table = db.table(names[0]);
 
-  const values = table.recordList
+  const values = (roots ?? table.recordList)
     .filter(record => !runtimeOf(record).isInserted())
     .map(record => runtimeOf(record).primaryKey());
 
