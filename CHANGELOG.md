@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented in this file.
 
+## [4.9.0]
+
+### Added
+
+- API resources accept `afterCommit`: a hook that runs only for a committed
+  write, with the committed row in hand — for side effects that must not
+  happen for a write that rolled back. It is awaited before the response; a
+  throwing hook is logged rather than served as an error.
+- `beforeWrite` receives the write transaction's `connection`: reads through
+  it join the transaction (and can lock the rows they validate), and rows it
+  inserts commit or roll back atomically with the write — the outbox pattern.
+
+### Changed
+
+- A create's `beforeWrite` now runs inside the write's transaction like the
+  other two writes (it previously ran before the transaction opened).
+  Refusals behave the same; hooks gain the connection.
+
+## [4.8.0]
+
+### Added
+
+- Record definitions accept table-level `foreignKeys`, including composite
+  ones: database-level enforcement whose referenced fields must match the
+  target's primary key, a unique constraint, or a full unique index. Models
+  load and bind over composite keys; navigation stays on single-column keys.
+
+### Fixed
+
+- Postgres introspection resolves foreign keys from `pg_constraint`, so keys
+  referencing a plain unique index (the backing a composite key needs) no
+  longer crash schema loading.
+- Reconcile and generated diffs order backing keys before the foreign keys
+  referencing them: new indexes first, then other constraints, then
+  cross-table foreign keys.
+- A record whose insert violates a database-only unique index (one declared
+  with `indexes`, not a runtime key) now surfaces the integrity error instead
+  of a masking `Bad filter` lookup failure.
+
 ## [4.7.0]
 
 ### Added

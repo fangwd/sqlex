@@ -210,8 +210,8 @@ await models.Membership.get({ team: 1, person: 2 });
 
 Every key part is required when creating, and `get`, `filter`, `update`, and
 `delete` all take the full key. A composite key cannot include a `generated`
-field, and a table with one cannot be the target of a foreign key, because
-composite foreign keys are not supported.
+field. A field-level `foreignKey` points at a single column; to reference a
+composite key, use a table-level `foreignKeys` declaration.
 
 ### Table-level constraints and indexes
 
@@ -240,8 +240,38 @@ export class Item extends defineRecord({
 | `unique` | Composite unique keys, each a list of field names |
 | `indexes` | Multi-column indexes; `unique` and `where` are optional |
 | `checks` | Named check constraints, emitted verbatim |
+| `foreignKeys` | Table-level foreign keys, including composite ones |
 
 Names are generated from the table and columns when omitted.
+
+A `foreignKeys` entry adds database-level enforcement without a navigable
+relation, so it can tie several columns to one parent — the way to keep a
+redundant identifier honest:
+
+```ts
+export class Room extends defineRecord({
+  table: 'room',
+  fields: {
+    id: field.id(),
+    project: field.foreignKey(() => Project),
+    zone: field.foreignKey(() => Zone, { nullable: true, onDelete: 'set null' }),
+  },
+  // The zone must belong to the same project as the room.
+  foreignKeys: [
+    {
+      fields: ['zone', 'project'],
+      references: { target: () => Zone, fields: ['id', 'project'] },
+    },
+  ],
+}) {}
+```
+
+The referenced fields must form the target's primary key or match a `unique`
+constraint or full (non-partial) unique index, in the same order. `name`,
+`onDelete`, and `onUpdate` are optional. A nullable member keeps the usual
+SQL semantics: while any member is null the check is skipped. The entry adds
+no navigable relation — keep per-field `foreignKey` declarations for reads
+and writes.
 
 `unique` and a unique `index` are not the same thing. A `unique` entry is a real
 unique key: the model uses it for identity, so `create` resolves an existing row

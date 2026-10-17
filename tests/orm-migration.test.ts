@@ -1090,6 +1090,304 @@ test('reconcile reads a MySQL schema that has check constraints', async () => {
   }
 });
 
+test('reconcile re-adds a missing check constraint', async () => {
+  const db = helper.connectToDatabase(NAME) as Database;
+  if (helper.isSqlite3(db.pool.dialect)) {
+    // SQLite keeps checks in the table DDL only and cannot alter them in place.
+    await db.end();
+    return;
+  }
+  class MemberV1 extends defineRecord({
+    table: 'reconcile_member',
+    fields: {
+      id: field.id(),
+      role: field.string({ maxLength: 20 }),
+    },
+  }) {}
+  class MemberV2 extends defineRecord({
+    table: 'reconcile_member',
+    fields: {
+      id: field.id(),
+      role: field.string({ maxLength: 20 }),
+    },
+    checks: [
+      { name: 'ck_member_role', expression: "role in ('designer', 'supplier')" },
+    ],
+  }) {}
+  class MemberV3 extends defineRecord({
+    table: 'reconcile_member',
+    fields: {
+      id: field.id(),
+      role: field.string({ maxLength: 20 }),
+    },
+    checks: [
+      { name: 'ck_member_role', expression: "role in ('designer')" },
+    ],
+  }) {}
+  const runner = new MigrationRunner(db);
+  try {
+    await runner.reconcile({ Member: MemberV1 });
+
+    const planned = await runner.reconcile({ Member: MemberV2 }, { dryRun: true });
+    expect(planned.join('\n')).toMatch(
+      /add constraint .*ck_member_role.* check \(role in \('designer', 'supplier'\)\)/
+    );
+    expect(await runner.reconcile({ Member: MemberV2 })).toEqual(planned);
+    expect(await runner.reconcile({ Member: MemberV2 })).toEqual([]);
+    await expect(
+      db.query("insert into reconcile_member (role) values ('ghost')")
+    ).rejects.toThrow();
+
+    // Checks are matched by name: engines rewrite the expression text, so a
+    // changed expression under the same name is not reported as drift.
+    expect(await runner.reconcile({ Member: MemberV3 })).toEqual([]);
+
+    await db.query(
+      'alter table reconcile_member add constraint ck_extra ' +
+      'check (length(role) > 0)'
+    );
+    await expect(runner.reconcile({ Member: MemberV2 })).rejects.toThrow(
+      'check constraint reconcile_member.ck_extra is not declared'
+    );
+    const dropped = await runner.reconcile(
+      { Member: MemberV2 },
+      { destructive: true }
+    );
+    expect(dropped.join('\n')).toMatch(/drop (constraint|check) .*ck_extra/);
+    expect(await runner.reconcile({ Member: MemberV2 })).toEqual([]);
+  } finally {
+    await db.query('drop table if exists reconcile_member');
+    await db.end();
+  }
+});
+
+test('reconcile manages a composite foreign key', async () => {
+  class Zone extends defineRecord({
+    table: 'reconcile_zone',
+    fields: {
+      id: field.id(),
+      project: field.integer(),
+      name: field.string({ maxLength: 40 }),
+    },
+    indexes: [
+      { fields: ['id', 'project'], unique: true, name: 'reconcile_zone_id_project_uidx' },
+    ],
+  }) {}
+  class Room extends defineRecord({
+    table: 'reconcile_room',
+    fields: {
+      id: field.id(),
+      project: field.integer(),
+      zone: field.foreignKey(() => Zone, { nullable: true, onDelete: 'set null' }),
+    },
+    // the zone must belong to the same project as the room
+    foreignKeys: [
+      {
+        fields: ['zone', 'project'],
+        references: { target: () => Zone, fields: ['id', 'project'] },
+      },
+    ],
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  try {
+    const created = await runner.reconcile({ Zone, Room });
+    expect(created.join('\n')).toContain('create table');
+    expect(await runner.reconcile({ Zone, Room })).toEqual([]);
+
+    // binding a model over a composite foreign key keeps single-column
+    // navigation and leaves the composite as enforcement only
+    const models = db.bind({ Zone, Room });
+    const zone = await models.Zone.objects.create({ project: 1, name: 'wet' });
+    const room = await models.Room.objects.create({ project: 1, zone });
+    const loaded = await models.Room.filter({ id: room.id })
+      .select({ zone: '*' })
+      .first();
+    expect(loaded?.zone).toBeInstanceOf(Zone);
+    expect((loaded?.zone as InstanceType<typeof Zone>).name).toBe('wet');
+
+    if (!helper.isSqlite3(db.pool.dialect)) {
+      // the database refuses a zone from another project
+      await expect(models.Room.objects.create({ project: 2, zone }))
+        .rejects.toThrow();
+      // a null member skips the check
+      await models.Room.objects.create({ project: 3, zone: null });
+
+      // a dropped key is re-added additively
+      await db.query(
+        db.pool.dialect === 'mysql'
+          ? 'alter table reconcile_room drop foreign key ' +
+            'reconcile_room_zone_id_project_fkey'
+          : 'alter table reconcile_room drop constraint ' +
+            'reconcile_room_zone_id_project_fkey'
+      );
+      const planned = await runner.reconcile({ Zone, Room }, { dryRun: true });
+      expect(planned.join('\n')).toContain(
+        'reconcile_room_zone_id_project_fkey'
+      );
+      expect(planned.join('\n')).toContain('foreign key');
+      expect(await runner.reconcile({ Zone, Room })).toEqual(planned);
+      expect(await runner.reconcile({ Zone, Room })).toEqual([]);
+
+      // with the backing index gone too, it is re-created before the key
+      // that references it, whichever table is declared first
+      await db.query(
+        db.pool.dialect === 'mysql'
+          ? 'alter table reconcile_room drop foreign key ' +
+            'reconcile_room_zone_id_project_fkey'
+          : 'alter table reconcile_room drop constraint ' +
+            'reconcile_room_zone_id_project_fkey'
+      );
+      for (const sql of runner.compiler.compile(
+        operation.dropIndex('reconcile_zone', 'reconcile_zone_id_project_uidx')
+      )) {
+        await db.query(sql);
+      }
+      const reordered = await runner.reconcile({ Zone, Room }, { dryRun: true });
+      const uniqueAt = reordered.findIndex(item => /create unique index/.test(item));
+      const foreignAt = reordered.findIndex(item => /foreign key/.test(item));
+      expect(uniqueAt).toBeGreaterThanOrEqual(0);
+      expect(foreignAt).toBeGreaterThan(uniqueAt);
+      expect(await runner.reconcile({ Zone, Room })).toEqual(reordered);
+      expect(await runner.reconcile({ Zone, Room })).toEqual([]);
+    }
+  } finally {
+    await db.query('drop table if exists reconcile_room');
+    await db.query('drop table if exists reconcile_zone');
+    await db.end();
+  }
+});
+
+test('reconcile leaves the implicit enum check alone', async () => {
+  const db = helper.connectToDatabase(NAME) as Database;
+  if (helper.isSqlite3(db.pool.dialect)) {
+    await db.end();
+    return;
+  }
+  class Level extends defineRecord({
+    table: 'reconcile_enum_check',
+    fields: {
+      id: field.id(),
+      level: field.enum({ values: ['low', 'high'], default: 'low' }),
+    },
+  }) {}
+  const runner = new MigrationRunner(db);
+  try {
+    // Postgres stores the enum as text plus an engine-named inline check;
+    // it belongs to the column and must not be reported as undeclared.
+    await runner.reconcile({ Level });
+    expect(await runner.reconcile({ Level })).toEqual([]);
+    expect(await runner.reconcile({ Level }, { destructive: true })).toEqual([]);
+  } finally {
+    await db.query('drop table if exists reconcile_enum_check');
+    await db.end();
+  }
+});
+
+test('reconcile detects index definition drift', async () => {
+  class Post extends defineRecord({
+    table: 'reconcile_post',
+    fields: {
+      id: field.id(),
+      author: field.string({ maxLength: 40 }),
+      title: field.string({ maxLength: 80 }),
+    },
+    indexes: [
+      { fields: ['author', 'title'], name: 'reconcile_post_author_title_idx' },
+    ],
+  }) {}
+  const db = helper.connectToDatabase(NAME) as Database;
+  const runner = new MigrationRunner(db);
+  const index = 'reconcile_post_author_title_idx';
+  const keyColumn = db.pool.dialect === 'postgres'
+    ? 'id serial primary key'
+    : db.pool.dialect === 'mysql'
+      ? 'id integer not null auto_increment primary key'
+      : 'id integer primary key';
+  const dropIndex = async () => {
+    for (const sql of runner.compiler.compile(
+      operation.dropIndex('reconcile_post', index)
+    )) {
+      await db.query(sql);
+    }
+  };
+  try {
+    await db.query(
+      'create table reconcile_post (' + keyColumn + ', ' +
+      'author varchar(40) not null, title varchar(80) not null)'
+    );
+    await db.query(`create index ${index} on reconcile_post (title)`);
+    await expect(runner.reconcile({ Post })).rejects.toThrow(
+      `index reconcile_post.${index} covers title, expected author, title`
+    );
+    const rebuilt = await runner.reconcile({ Post }, { destructive: true });
+    expect(rebuilt.join('\n')).toContain('drop index');
+    expect(rebuilt.join('\n')).toContain('create index');
+    expect(await runner.reconcile({ Post })).toEqual([]);
+
+    // SQLite reports unique indexes as unnamed unique constraints, so a
+    // uniqueness drift there is an unresolvable conflict, not index drift.
+    if (!helper.isSqlite3(db.pool.dialect)) {
+      await dropIndex();
+      await db.query(
+        `create unique index ${index} on reconcile_post (author, title)`
+      );
+      await expect(runner.reconcile({ Post })).rejects.toThrow(
+        `index reconcile_post.${index} is unique, expected not unique`
+      );
+      await runner.reconcile({ Post }, { destructive: true });
+      expect(await runner.reconcile({ Post })).toEqual([]);
+    }
+  } finally {
+    await db.query('drop table if exists reconcile_post');
+    await db.end();
+  }
+});
+
+test('reconcile detects a partial index rebuilt without its predicate', async () => {
+  const db = helper.connectToDatabase(NAME) as Database;
+  if (db.pool.dialect === 'mysql') {
+    // MySQL has no partial indexes.
+    await db.end();
+    return;
+  }
+  class Note extends defineRecord({
+    table: 'reconcile_note',
+    fields: {
+      id: field.id(),
+      owner: field.string({ maxLength: 40 }),
+      body: field.text({ nullable: true }),
+    },
+    indexes: [
+      {
+        fields: ['owner'],
+        name: 'reconcile_note_owner_idx',
+        where: 'body is not null',
+      },
+    ],
+  }) {}
+  const runner = new MigrationRunner(db);
+  const keyColumn = db.pool.dialect === 'postgres'
+    ? 'id serial primary key'
+    : 'id integer primary key';
+  try {
+    await db.query(
+      'create table reconcile_note (' + keyColumn + ', ' +
+      'owner varchar(40) not null, body text null)'
+    );
+    await db.query('create index reconcile_note_owner_idx on reconcile_note (owner)');
+    await expect(runner.reconcile({ Note })).rejects.toThrow(
+      'index reconcile_note.reconcile_note_owner_idx is not partial, expected partial'
+    );
+    const rebuilt = await runner.reconcile({ Note }, { destructive: true });
+    expect(rebuilt.join('\n')).toContain('where body is not null');
+    expect(await runner.reconcile({ Note })).toEqual([]);
+  } finally {
+    await db.query('drop table if exists reconcile_note');
+    await db.end();
+  }
+});
+
 test('destructive reconcile drops a stale foreign key before its unique key', async () => {
   class Publisher extends defineRecord({
     table: 'reconcile_publisher',
@@ -1207,6 +1505,74 @@ test('make generates alterColumn for changed columns', () => {
     );
   expect(new MigrationCompiler('mysql', encoder('mysql')).compile(enumAlter))
     .toEqual(["alter table `orm_widget` modify column `level` enum('low','high') not null"]);
+});
+
+test('migration diffs carry check constraint changes', () => {
+  const encoder = (dialect: 'postgres' | 'mysql' | 'sqlite3') => ({
+    dialect,
+    escape: (value: string) => `'${value.replace(/'/g, "''")}'`,
+    escapeId: (value: string) =>
+      dialect === 'mysql' ? `\`${value}\`` : `"${value}"`,
+    escapeDate: (value: Date) => `'${value.toISOString()}'`,
+  });
+  class MeterV1 extends defineRecord({
+    table: 'orm_meter',
+    fields: {
+      id: field.id(),
+      score: field.integer(),
+    },
+  }) {}
+  class MeterV2 extends defineRecord({
+    table: 'orm_meter',
+    fields: {
+      id: field.id(),
+      score: field.integer(),
+    },
+    checks: [{ name: 'ck_meter_score', expression: 'score >= 0' }],
+  }) {}
+  class MeterV3 extends defineRecord({
+    table: 'orm_meter',
+    fields: {
+      id: field.id(),
+      score: field.integer(),
+    },
+    checks: [{ name: 'ck_meter_score', expression: 'score >= 0 and score <= 10' }],
+  }) {}
+
+  const initial = makeMigration('0001_meter', { Meter: MeterV1 }).migration;
+  const added = makeMigration('0002_meter', { Meter: MeterV2 }, initial);
+  expect(added.warnings).toEqual([]);
+  expect(added.migration.up).toEqual([
+    operation.addCheck('orm_meter', {
+      name: 'ck_meter_score',
+      expression: 'score >= 0',
+    }),
+  ]);
+  expect(added.migration.down).toEqual([
+    operation.dropCheck('orm_meter', 'ck_meter_score'),
+  ]);
+  expect(
+    new MigrationCompiler('postgres', encoder('postgres')).compile(added.migration.up[0])
+  ).toEqual([
+    'alter table "orm_meter" add constraint "ck_meter_score" check (score >= 0)',
+  ]);
+  expect(
+    new MigrationCompiler('mysql', encoder('mysql')).compile(added.migration.down[0])
+  ).toEqual(['alter table `orm_meter` drop check `ck_meter_score`']);
+  expect(() =>
+    new MigrationCompiler('sqlite3', encoder('sqlite3')).compile(added.migration.up[0])
+  ).toThrow('SQLite cannot add constraints');
+
+  // engines rewrite the expression text, so a changed check is a warning
+  const changed = makeMigration('0003_meter', { Meter: MeterV3 }, added.migration);
+  expect(changed.migration.up).toEqual([]);
+  expect(changed.warnings.join('\n'))
+    .toContain('orm_meter check ck_meter_score changed');
+
+  const removed = makeMigration('0004_meter', { Meter: MeterV1 }, added.migration);
+  expect(removed.migration.up).toEqual([]);
+  expect(removed.warnings.join('\n'))
+    .toContain('orm_meter check ck_meter_score was removed');
 });
 
 test('dialect compilers emit engine-specific DDL', () => {

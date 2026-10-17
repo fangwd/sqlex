@@ -17,6 +17,7 @@ import {
   DEFAULT_PAGE_LIMIT,
   OPERATIONS,
   Operation,
+  AfterCommitFn,
   AfterReadFn,
   AssignFn,
   AuthorizeFn,
@@ -99,6 +100,7 @@ export interface ResourcePlan<TContext = unknown> {
   assign?: AssignFn<TContext>;
   authorize?: AuthorizeFn<TContext>;
   beforeWrite?: BeforeWriteFn<TContext>;
+  afterCommit?: AfterCommitFn<TContext>;
   afterRead?: AfterReadFn<TContext>;
 }
 
@@ -290,6 +292,7 @@ function compileResource<TContext>(
     assign: config.assign,
     authorize: config.authorize,
     beforeWrite: config.beforeWrite,
+    afterCommit: config.afterCommit,
     afterRead: config.afterRead,
   };
 }

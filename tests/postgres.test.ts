@@ -58,6 +58,21 @@ test('raw query() returns rows for INSERT ... RETURNING', async () => {
     // An INSERT with no RETURNING yields an empty array.
     const none = await db.query('insert into category (name) values (?)', 'no-returning-cat');
     expect(none).toEqual([]);
+
+    // UPDATE/DELETE ... RETURNING resolve to rows; without RETURNING to a count.
+    const updated = await db.query<{ name: string }[]>(
+      "update category set name = name || '!' where name = ? returning name",
+      'insert-cat',
+    );
+    expect(updated).toEqual([{ name: 'insert-cat!' }]);
+    const deleted = await db.query<{ name: string }[]>(
+      'delete from category where name = ? returning name',
+      'insert-cat!',
+    );
+    expect(deleted).toEqual([{ name: 'insert-cat!' }]);
+    expect(await db.query('update category set name = name where name = ?', 'none')).toEqual({
+      affectedRowCount: 0,
+    });
   } finally {
     await db.end();
     await helper.dropDatabase(NAME);

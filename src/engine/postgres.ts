@@ -24,6 +24,7 @@ interface QueryResult {
   command: string;
   rowCount: number | null;
   rows: { [key: string]: unknown }[];
+  fields: unknown[];
 }
 interface Client {
   connect(): Promise<void>;
@@ -129,9 +130,10 @@ export class _Connection extends Connection {
             // is usable (an INSERT with no RETURNING simply yields []).
             return pk ? valueOf(result.rows[0][pk]) : result.rows;
           default:
-            return {
-              affectedRowCount: result.rowCount,
-            };
+            // UPDATE/DELETE ... RETURNING hand back their rows too
+            return result.fields?.length
+              ? result.rows
+              : { affectedRowCount: result.rowCount };
         }
       })
       .catch((error: unknown) => {
@@ -195,7 +197,7 @@ type ForeignKeyMap = {
   [key: string]: {
     [key: string]: {
       table: string;
-      constraint: string;
+      columns: string[];
       onUpdate: string;
       onDelete: string;
     }
@@ -258,11 +260,10 @@ class SchemaBuilder {
           case 'FOREIGN KEY':
             const {
               table,
-              constraint: unique,
+              columns,
               onUpdate,
               onDelete
             } = foreignKeyMap[tableName][constraintName];
-            const columns = columnUsageMap[table][unique].map(e => e.column);
             constraint.references = { table, columns };
             constraint.onUpdate = onUpdate;
             constraint.onDelete = onDelete;
@@ -464,36 +465,44 @@ class SchemaBuilder {
     return result;
   }
 
-  // table_name -> constraint_name -> [{ table, constraint }]
+  // table_name -> constraint_name -> { table, columns, actions }. Read from
+  // pg_constraint rather than information_schema: a foreign key may reference
+  // the columns of a plain unique index, which the referential_constraints
+  // view cannot join to a table_constraints row.
   async getForeignKeyMap(): Promise<ForeignKeyMap> {
     const rows = await query<{
       table_name: string;
       constraint_name: string;
       foreign_table_name: string;
-      unique_constraint_name: string;
+      referenced_columns: string[];
       update_rule: string;
       delete_rule: string;
     }>(this.connection, `
-      select distinct fk.table_name as table_name, rc.constraint_name,
-          pk.table_name as foreign_table_name, rc.unique_constraint_name,
-          rc.update_rule, rc.delete_rule
-      from
-          information_schema.referential_constraints rc
-          join information_schema.table_constraints fk on
-              rc.constraint_name = fk.constraint_name and rc.constraint_schema = fk.table_schema
-          join information_schema.table_constraints pk on
-              rc.unique_constraint_name = pk.constraint_name and rc.unique_constraint_schema = pk.table_schema
-      where
-          fk.table_catalog=${this.escapedCatalogName} and fk.table_schema = ${this.escapedSchemaName};
+      select src.relname as table_name, con.conname as constraint_name,
+          tgt.relname as foreign_table_name,
+          (select array_agg(a.attname::text order by k.ord)
+             from unnest(con.confkey) with ordinality as k(attnum, ord)
+             join pg_attribute a
+               on a.attrelid = con.confrelid and a.attnum = k.attnum
+          ) as referenced_columns,
+          con.confupdtype as update_rule, con.confdeltype as delete_rule
+      from pg_constraint con
+          join pg_class src on src.oid = con.conrelid
+          join pg_namespace n on n.oid = src.relnamespace
+          join pg_class tgt on tgt.oid = con.confrelid
+      where con.contype = 'f' and n.nspname = ${this.escapedSchemaName};
     `);
+    const action = (rule: string): string =>
+      ({ a: 'NO ACTION', r: 'RESTRICT', c: 'CASCADE', n: 'SET NULL', d: 'SET DEFAULT' }[rule]
+        || 'NO ACTION');
     const result: ForeignKeyMap = {};
     for (const row of rows) {
       result[row.table_name] = result[row.table_name] || {};
       result[row.table_name][row.constraint_name] = {
         table: row.foreign_table_name,
-        constraint: row.unique_constraint_name,
-        onUpdate: row.update_rule,
-        onDelete: row.delete_rule,
+        columns: row.referenced_columns || [],
+        onUpdate: action(row.update_rule),
+        onDelete: action(row.delete_rule),
       };
     }
     return result;

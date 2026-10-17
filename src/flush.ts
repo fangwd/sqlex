@@ -120,9 +120,9 @@ async function _persist(
 ): Promise<Record> {
   const method = runtimeOf(record).state.method;
   const model = runtimeOf(record).table.model;
-  const filter = getUniqueFields(model, runtimeOf(record).data as Document)!;
+  const filter = getUniqueFields(model, runtimeOf(record).data as Document);
   if (method === FlushMethod.DELETE) {
-    await runtimeOf(record).table._delete(connection, filter);
+    await runtimeOf(record).table._delete(connection, filter!);
     runtimeOf(record).state.deleted = true;
     return record;
   }
@@ -133,7 +133,7 @@ async function _persist(
     const result = await runtimeOf(record).table._update(
       connection,
       fields,
-      filter
+      filter!
     );
     if ((result.affectedRowCount || result.affectedRows) > 0) {
       runtimeOf(record).removeDirty(Object.keys(fields));
@@ -165,6 +165,10 @@ async function _persist(
       }
     }
 
+    // Without a unique key value there is no way to locate the winning row
+    // (a database-only unique index, for example); surface the real error
+    // rather than masking it with a bad lookup.
+    if (filter === undefined) throw error;
     const row = await runtimeOf(record).table._get(connection, filter);
     if (!row) {
       // Not a visible unique-key conflict (e.g. a lock error that matched the

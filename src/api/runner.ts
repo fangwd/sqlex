@@ -1,5 +1,6 @@
 import { Database, SelectOptions } from '../database';
 import { Connection } from '../engine';
+import logger from '../logger';
 import { ForeignKeyField, SimpleField } from '../schema';
 import { Document, DocumentValue, Value } from '../types';
 import { dateToString } from '../utils';
@@ -457,9 +458,11 @@ export async function createRow<TContext>(
   const body = data;
   const stamps = resource.assign ? await resource.assign(context, 'create') : {};
   data = { ...data, ...stamps };
-  data = await beforeWrite(resource, context, 'create', data, body);
-  return write(() =>
+  const result = await write(() =>
     db.transaction(async connection => {
+      // Inside the transaction like the other two writes, so a hook can read
+      // and write atomically with the row it guards.
+      data = await beforeWrite(resource, context, 'create', data, body, undefined, connection);
       const table = db.table(resource.model);
       await assertReferencesAdmitted(db, plan, resource, data, body, stamps, context, connection);
       const created = await table.create<Document>(data, undefined, connection);
@@ -469,6 +472,8 @@ export async function createRow<TContext>(
       return { row, identity };
     })
   );
+  await afterCommit(resource, context, 'create', data, body, result.row);
+  return result;
 }
 
 export async function updateRow<TContext>(
@@ -482,7 +487,7 @@ export async function updateRow<TContext>(
   const body = data;
   const stamps = resource.assign ? await resource.assign(context, 'update') : {};
   data = { ...data, ...stamps };
-  return write(() =>
+  const row = await write(() =>
     db.transaction(async connection => {
       const table = db.table(resource.model);
       const where = await scoped(resource, identity, context);
@@ -494,16 +499,18 @@ export async function updateRow<TContext>(
 
       // With the current row in hand, and inside the transaction, so a refusal
       // leaves nothing behind.
-      data = await beforeWrite(resource, context, 'update', data, body, existing[0]);
+      data = await beforeWrite(resource, context, 'update', data, body, existing[0], connection);
 
       await assertReferencesAdmitted(db, plan, resource, data, body, stamps, context, connection);
       await table.update(data, where, connection);
 
-      const row = await readItem(db, plan, resource, identity, bareRequest(resource), context, connection);
-      if (!row) throw outsideScope('change');
-      return row;
+      const changed = await readItem(db, plan, resource, identity, bareRequest(resource), context, connection);
+      if (!changed) throw outsideScope('change');
+      return changed;
     })
   );
+  await afterCommit(resource, context, 'update', data, body, row);
+  return row;
 }
 
 export async function deleteRow<TContext>(
@@ -513,16 +520,18 @@ export async function deleteRow<TContext>(
   identity: Document,
   context: TContext
 ): Promise<void> {
-  await write(() =>
+  const existing = await write(() =>
     db.transaction(async connection => {
       const table = db.table(resource.model);
       const where = await scoped(resource, identity, context);
-      const existing = await table.select<Document>('*', { where, limit: 1 }, undefined, connection);
-      if (!existing.length) throw ApiError.notFound(missing(resource, identity));
-      await beforeWrite(resource, context, 'delete', {}, {}, existing[0]);
+      const found = await table.select<Document>('*', { where, limit: 1 }, undefined, connection);
+      if (!found.length) throw ApiError.notFound(missing(resource, identity));
+      await beforeWrite(resource, context, 'delete', {}, {}, found[0], connection);
       await table.delete(where, connection);
+      return found[0];
     })
   );
+  await afterCommit(resource, context, 'delete', {}, {}, existing);
 }
 
 /**
@@ -574,10 +583,35 @@ async function beforeWrite<TContext>(
   operation: 'create' | 'update' | 'delete',
   data: Document,
   body: Document,
-  row?: Document
+  row?: Document,
+  connection?: Connection
 ): Promise<Document> {
   if (!resource.beforeWrite) return data;
-  return (await resource.beforeWrite(context, { operation, data, body, row })) ?? data;
+  return (await resource.beforeWrite(context, { operation, data, body, row, connection })) ?? data;
+}
+
+/**
+ * Runs the resource's committed-write side effects. The write already
+ * happened, so a failure here is logged rather than turned into a response
+ * error the client would read as "the write failed".
+ */
+async function afterCommit<TContext>(
+  resource: ResourcePlan<TContext>,
+  context: TContext,
+  operation: 'create' | 'update' | 'delete',
+  data: Document,
+  body: Document,
+  row?: Document
+): Promise<void> {
+  if (!resource.afterCommit) return;
+  try {
+    await resource.afterCommit(context, { operation, data, body, row });
+  } catch (error) {
+    logger.error(
+      `afterCommit failed for ${resource.name} ${operation}:`,
+      error instanceof Error ? error.message : error
+    );
+  }
 }
 
 /** Runs a write, translating a refused one into the status that describes it. */

@@ -301,6 +301,25 @@ export interface RecordCheckDefinition {
   expression: string;
 }
 
+/**
+ * A table-level foreign key over one or more fields. Enforcement only: it
+ * adds no navigable relation, so fields keep their own `foreignKey`
+ * declarations for reads and writes. The referenced fields must form the
+ * target's primary key or match a unique constraint or full (non-partial)
+ * unique index, in the same order.
+ */
+export interface RecordForeignKeyDefinition {
+  fields: readonly string[];
+  references: {
+    /** The target record class, or a table name (`'self'` for the owner). */
+    target: (() => RecordClass<any, any>) | string;
+    fields: readonly string[];
+  };
+  name?: string;
+  onDelete?: ReferentialAction;
+  onUpdate?: ReferentialAction;
+}
+
 export interface RecordDefinition<
   TFields extends FieldDefinitions = FieldDefinitions
 > {
@@ -314,6 +333,8 @@ export interface RecordDefinition<
   unique?: readonly (readonly string[])[];
   indexes?: readonly RecordIndexDefinition[];
   checks?: readonly RecordCheckDefinition[];
+  /** Table-level foreign keys, including composite ones. */
+  foreignKeys?: readonly RecordForeignKeyDefinition[];
   /** Table comment: stored by mysql and postgres, and used as API docs. */
   comment?: string;
 }
@@ -822,12 +843,107 @@ function tableFromRecord(
     });
   }
 
+  for (const foreignKey of recordClass.definition.foreignKeys || []) {
+    constraints.push(tableForeignKey(recordClass, foreignKey, registered));
+  }
+
   return {
     name: recordClass.definition.table,
     columns,
     constraints,
     comment: recordClass.definition.comment,
   };
+}
+
+/** The default name of a foreign key over the given child columns. */
+export function foreignKeyName(
+  table: string,
+  columns: readonly string[]
+): string {
+  return `${table}_${columns.join('_')}_fkey`;
+}
+
+function tableForeignKey(
+  recordClass: RecordClass,
+  foreignKey: RecordForeignKeyDefinition,
+  registered: Map<string, RecordClass>
+): Constraint {
+  const table = recordClass.definition.table;
+  const columns = foreignKey.fields.map(fieldName =>
+    columnName(fieldName, fieldDefinition(recordClass, fieldName))
+  );
+  const target = resolveTargetClass(
+    foreignKey.references.target,
+    recordClass,
+    registered
+  );
+  const targetColumns = foreignKey.references.fields.map(fieldName =>
+    columnName(fieldName, fieldDefinition(target, fieldName))
+  );
+  assertReferencedKey(target, foreignKey.references.fields);
+  return {
+    name: foreignKey.name || foreignKeyName(table, columns),
+    columns,
+    references: { table: target.definition.table, columns: targetColumns },
+    ...(foreignKey.onDelete ? { onDelete: foreignKey.onDelete } : {}),
+    ...(foreignKey.onUpdate ? { onUpdate: foreignKey.onUpdate } : {}),
+  };
+}
+
+function resolveTargetClass(
+  target: (() => RecordClass<any, any>) | string,
+  owner: RecordClass,
+  registered: Map<string, RecordClass>
+): RecordClass {
+  const table = typeof target === 'string'
+    ? target === 'self'
+      ? owner.definition.table
+      : target
+    : target().definition.table;
+  const resolved = registered.get(table);
+  if (!resolved) {
+    throw Error(
+      `${owner.definition.table}: referenced model ${table} is not present ` +
+      'in the binding'
+    );
+  }
+  return resolved;
+}
+
+// A foreign key needs unique backing: the target's primary key, a unique
+// constraint, or a full unique index over exactly the referenced fields.
+function assertReferencedKey(
+  target: RecordClass,
+  fields: readonly string[]
+): void {
+  const definition = target.definition;
+  const columns = fields.map(fieldName =>
+    columnName(fieldName, fieldDefinition(target, fieldName))
+  );
+  const sameOrder = (candidate: readonly string[]) =>
+    candidate.length === columns.length &&
+    candidate.every((column, position) => column === columns[position]);
+  const columnsOf = (names: readonly string[]) =>
+    names.map(name => columnName(name, fieldDefinition(target, name)));
+  const primary = columnsOf(
+    Object.entries(definition.fields)
+      .filter(([, field]) => field.options.primaryKey)
+      .map(([name]) => name)
+  );
+  const backed =
+    sameOrder(primary) ||
+    (columns.length === 1 &&
+      Boolean(fieldDefinition(target, fields[0]).options.unique)) ||
+    (definition.unique || []).some(group => sameOrder(columnsOf(group))) ||
+    (definition.indexes || []).some(index =>
+      index.unique && !index.where && sameOrder(columnsOf(index.fields))
+    );
+  if (!backed) {
+    throw Error(
+      `${definition.table} (${columns.join(', ')}): a foreign key must ` +
+      'reference the primary key, a unique constraint, or a full unique index'
+    );
+  }
 }
 
 function columnFromField(

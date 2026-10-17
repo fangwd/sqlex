@@ -121,8 +121,10 @@ export class Model {
 
     for (const index of table.constraints) {
       if (index.references) {
+        // A composite foreign key is database-level enforcement only;
+        // navigation stays on the single-column keys.
         if (index.columns.length > 1) {
-          throw Error('Composite foreign keys are not supported');
+          continue;
         }
         references[index.columns[0]] = index;
       }
@@ -325,7 +327,7 @@ export class Model {
         }
       }
 
-      if (index.references) {
+      if (index.references && index.columns.length === 1) {
         const field = this.field(index.columns[0]);
         if (field instanceof ForeignKeyField) {
           const referencedTable = this.schema.model(index.references.table);

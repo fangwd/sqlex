@@ -18,6 +18,7 @@ import {
   type RecordClass,
   type RecordClassMap,
   columnName,
+  foreignKeyName,
   schemaFromRecords,
 } from './orm';
 import { encodeVector, isVectorColumn } from './vector';
@@ -70,6 +71,8 @@ export type MigrationOperation =
     }
   | { kind: 'createIndex'; table: string; index: MigrationIndex }
   | { kind: 'dropIndex'; table: string; index: string }
+  | { kind: 'addCheck'; table: string; check: MigrationCheck }
+  | { kind: 'dropCheck'; table: string; check: string }
   | { kind: 'sql'; statements: string[] };
 
 export interface Migration {
@@ -180,6 +183,16 @@ export const operation = Object.freeze({
     table,
     index,
   }),
+  addCheck: (table: string, check: MigrationCheck): MigrationOperation => ({
+    kind: 'addCheck',
+    table,
+    check,
+  }),
+  dropCheck: (table: string, check: string): MigrationOperation => ({
+    kind: 'dropCheck',
+    table,
+    check,
+  }),
   sql: (statements: string | string[]): MigrationOperation => ({
     kind: 'sql',
     statements: typeof statements === 'string' ? [statements] : statements,
@@ -203,8 +216,24 @@ export function migrationSchemaFromRecords(
     tables: schema.tables.map(table => {
       const recordClass = byTable.get(table.name)!;
       const fields = Object.entries(recordClass.definition.fields);
+      // Table-level keys carry their own actions; a field's options only
+      // feed the per-field key its declaration produced.
+      const tableKeyNames = new Set(
+        (recordClass.definition.foreignKeys || []).map(foreignKey =>
+          foreignKey.name ||
+          foreignKeyName(
+            table.name,
+            foreignKey.fields.map(fieldName =>
+              columnName(fieldName, recordClass.definition.fields[fieldName])
+            )
+          )
+        )
+      );
       const constraints = table.constraints.map(constraint => {
         if (!constraint.references) return constraint;
+        if (constraint.name && tableKeyNames.has(constraint.name)) {
+          return constraint;
+        }
         const field = fields.find(([fieldName, definition]) =>
           columnName(fieldName, definition) === constraint.columns[0]
         )![1];
@@ -268,8 +297,12 @@ export function diffMigrationSchemas(
   );
   const nextTables = new Map(next.tables.map(table => [table.name, table]));
 
-  const newTables = next.tables.filter(table => !previousTables.has(table.name));
-  operations.push(...createTableOperations(newTables));
+  // New tables arrive fully ordered by createTableOperations; the diff of the
+  // existing tables is ordered once at the end so backing keys precede the
+  // foreign keys referencing them.
+  const created = createTableOperations(
+    next.tables.filter(table => !previousTables.has(table.name))
+  );
 
   for (const table of next.tables) {
     const oldTable = previousTables.get(table.name);
@@ -311,6 +344,7 @@ export function diffMigrationSchemas(
 
     diffConstraints(oldTable, table, operations, warnings, blockedColumns);
     diffIndexes(oldTable, table, operations, warnings, blockedColumns);
+    diffChecks(oldTable, table, operations, warnings);
   }
 
   for (const table of previous?.tables || []) {
@@ -321,7 +355,11 @@ export function diffMigrationSchemas(
     }
   }
 
-  return { operations, warnings, schema: next };
+  return {
+    operations: [...created, ...orderAdditive(operations)],
+    warnings,
+    schema: next,
+  };
 }
 
 export function makeMigration(
@@ -356,6 +394,8 @@ export function invertOperations(
         return operation.dropConstraint(item.table, item.constraint);
       case 'createIndex':
         return operation.dropIndex(item.table, item.index.name);
+      case 'addCheck':
+        return operation.dropCheck(item.table, item.check.name);
       case 'renameColumn':
         return operation.renameColumn(item.table, item.to, item.from);
       case 'sql':
@@ -440,6 +480,29 @@ export class MigrationCompiler {
         return [this.createIndex(operation.table, operation.index)];
       case 'dropIndex':
         return [this.dropIndex(operation.table, operation.index)];
+      case 'addCheck':
+        if (this.dialect === 'sqlite3') {
+          throw Error(
+            'SQLite cannot add constraints in place; use a table rebuild or raw SQL migration'
+          );
+        }
+        return [
+          `alter table ${this.id(operation.table)} add ` +
+          `constraint ${this.id(operation.check.name)} ` +
+          `check (${operation.check.expression})`,
+        ];
+      case 'dropCheck':
+        if (this.dialect === 'sqlite3') {
+          throw Error(
+            'SQLite cannot drop constraints in place; use a table rebuild or raw SQL migration'
+          );
+        }
+        // MySQL only accepts `drop check` for check constraints.
+        return [
+          `alter table ${this.id(operation.table)} drop ` +
+          (this.dialect === 'mysql' ? 'check ' : 'constraint ') +
+          this.id(operation.check),
+        ];
       case 'sql':
         return [...operation.statements];
     }
@@ -999,10 +1062,12 @@ export class MigrationRunner {
         this.db.name,
         schemaName
       );
-      const indexes = await getIndexNames(connection, this.db.name, schemaName);
+      const indexes = await getLiveIndexes(connection, this.db.name, schemaName);
+      const checks = await getLiveChecks(connection, this.db.name, schemaName);
       const sql = reconcileOperations(
         live,
         indexes,
+        checks,
         expected,
         connection.dialect,
         Boolean(options.destructive)
@@ -1241,6 +1306,35 @@ function diffIndexes(
   }
 }
 
+function diffChecks(
+  previous: MigrationTable,
+  next: MigrationTable,
+  operations: MigrationOperation[],
+  warnings: string[]
+): void {
+  const oldItems = new Map(
+    (previous.checks || []).map(item => [item.name, item])
+  );
+  const newItems = new Map((next.checks || []).map(item => [item.name, item]));
+  for (const [name, check] of newItems) {
+    const old = oldItems.get(name);
+    if (!old) {
+      operations.push(operation.addCheck(next.name, check));
+    } else if (old.expression !== check.expression) {
+      warnings.push(
+        `${next.name} check ${name} changed; add explicit drop/create operations`
+      );
+    }
+  }
+  for (const name of oldItems.keys()) {
+    if (!newItems.has(name)) {
+      warnings.push(
+        `${next.name} check ${name} was removed; destructive changes are not generated`
+      );
+    }
+  }
+}
+
 interface DeferredConstraint {
   table: string;
   constraint: MigrationConstraint;
@@ -1385,7 +1479,8 @@ function assertSchemaCompatible(
 
 function reconcileOperations(
   live: DatabaseDefinition,
-  liveIndexes: ReadonlySet<string>,
+  liveIndexes: ReadonlyMap<string, LiveIndex>,
+  liveChecks: ReadonlyMap<string, readonly LiveCheck[]>,
   expected: MigrationSchema,
   dialect: Dialect,
   destructive: boolean
@@ -1459,7 +1554,12 @@ function reconcileOperations(
         // MySQL and SQLite report unique indexes as constraints.
         (Boolean(constraint.unique) && table.indexes.some(index =>
           index.unique && sameSchemaValue(index.columns, constraint.columns)
-        ));
+        )) ||
+        // A unique index whose definition drifted is still declared by name;
+        // the index comparison below reports or rebuilds it, so it must not
+        // also be dropped as an undeclared constraint.
+        (Boolean(constraint.unique) && constraint.name !== undefined &&
+          table.indexes.some(index => index.name === constraint.name));
       if (isDeclared) continue;
       if (destructive && constraint.name && dialect !== 'sqlite3') {
         const drop = operation.dropConstraint(table.name, constraint);
@@ -1484,8 +1584,42 @@ function reconcileOperations(
       }
     }
     for (const index of table.indexes) {
-      if (!liveIndexes.has(`${table.name}.${index.name}`)) {
+      const actualIndex = liveIndexes.get(`${table.name}.${index.name}`);
+      if (!actualIndex) {
         added.push(operation.createIndex(table.name, index));
+        continue;
+      }
+      const difference = indexDifference(actualIndex, index, table.name);
+      if (!difference) continue;
+      if (destructive) {
+        dropped.push(operation.dropIndex(table.name, index.name));
+        added.push(operation.createIndex(table.name, index));
+      } else {
+        problems.push(difference);
+      }
+    }
+
+    if (supportsChecks(dialect)) {
+      const actualChecks = liveChecks.get(table.name) || [];
+      const declaredChecks = table.checks || [];
+      const declaredNames = new Set(declaredChecks.map(check => check.name));
+      for (const check of declaredChecks) {
+        if (!actualChecks.some(item => item.name === check.name)) {
+          added.push(operation.addCheck(table.name, check));
+        }
+      }
+      // The inline check standing in for an enum column is named by the
+      // engine after the column and belongs to it, not to the declarations.
+      const implicit = implicitEnumCheckNames(table);
+      for (const check of actualChecks) {
+        if (declaredNames.has(check.name) || implicit.has(check.name)) continue;
+        if (destructive) {
+          dropped.push(operation.dropCheck(table.name, check.name));
+        } else {
+          problems.push(
+            `check constraint ${table.name}.${check.name} is not declared`
+          );
+        }
       }
     }
   }
@@ -1496,31 +1630,239 @@ function reconcileOperations(
       problems.map(item => `- ${item}`).join('\n')
     );
   }
-  return [...created, ...droppedForeign, ...dropped, ...changed, ...added];
+  return [
+    ...created,
+    ...droppedForeign,
+    ...dropped,
+    ...changed,
+    ...orderAdditive(added),
+  ];
+}
+
+/**
+ * Order additive operations so every dependency exists first: plain changes,
+ * then indexes (a foreign key may reference a unique index), then other
+ * constraints, then cross-table foreign keys last (their backing key may be
+ * an index or unique constraint added anywhere in this batch). Relative
+ * order within each group is preserved.
+ */
+function orderAdditive(operations: MigrationOperation[]): MigrationOperation[] {
+  const rest: MigrationOperation[] = [];
+  const indexes: MigrationOperation[] = [];
+  const constraints: MigrationOperation[] = [];
+  const foreign: MigrationOperation[] = [];
+  for (const item of operations) {
+    if (item.kind === 'createIndex') {
+      indexes.push(item);
+    } else if (
+      item.kind === 'addConstraint' &&
+      item.constraint.references &&
+      item.constraint.references.table !== item.table
+    ) {
+      foreign.push(item);
+    } else if (item.kind === 'addConstraint' || item.kind === 'addCheck') {
+      constraints.push(item);
+    } else {
+      rest.push(item);
+    }
+  }
+  return [...rest, ...indexes, ...constraints, ...foreign];
+}
+
+interface LiveIndex {
+  /** Index key columns in order; empty when the dialect does not report them. */
+  columns: string[];
+  unique?: boolean;
+  /** Whether the index has a predicate; undefined when not introspected. */
+  partial?: boolean;
 }
 
 // Every live index as `table.index`, including those backing unique and
-// primary key constraints.
-async function getIndexNames(
+// primary key constraints. SQLite and unknown dialects report names only,
+// so callers fall back to existence checks when columns are empty.
+async function getLiveIndexes(
   connection: Connection,
   catalogName: string,
   schemaName?: string
-): Promise<Set<string>> {
-  const sql = connection.dialect === 'postgres'
-    ? 'select tablename as table_name, indexname as index_name ' +
-      'from pg_indexes where schemaname = ' +
-      connection.escape(schemaName || 'public')
-    : connection.dialect === 'mysql'
-      ? 'select table_name as table_name, index_name as index_name ' +
+): Promise<Map<string, LiveIndex>> {
+  const indexes = new Map<string, LiveIndex>();
+  const add = (
+    table: string,
+    name: string,
+    column: string | null,
+    flags?: { unique?: boolean; partial?: boolean }
+  ) => {
+    const key = `${table}.${name}`;
+    let index = indexes.get(key);
+    if (!index) {
+      index = { columns: [], ...flags };
+      indexes.set(key, index);
+    }
+    if (column) index.columns.push(column);
+  };
+  if (connection.dialect === 'postgres') {
+    const rows = await queryInformationSchema<{
+      table_name: string;
+      index_name: string;
+      column_name: string | null;
+      is_unique: boolean;
+      is_partial: boolean;
+    }>(
+      connection,
+      'select c.relname as table_name, i.relname as index_name, ' +
+        'a.attname as column_name, ix.indisunique as is_unique, ' +
+        '(ix.indpred is not null) as is_partial ' +
+        'from pg_index ix ' +
+        'join pg_class i on i.oid = ix.indexrelid ' +
+        'join pg_class c on c.oid = ix.indrelid ' +
+        'join pg_namespace n on n.oid = c.relnamespace ' +
+        'cross join generate_series(0, ix.indnatts - 1) as k(n) ' +
+        'left join pg_attribute a ' +
+        'on a.attrelid = ix.indrelid and a.attnum = ix.indkey[k.n] ' +
+        'where n.nspname = ' +
+        connection.escape(schemaName || 'public') +
+        ' order by c.relname, i.relname, k.n'
+    );
+    for (const row of rows) {
+      add(row.table_name, row.index_name, row.column_name, {
+        unique: row.is_unique,
+        partial: row.is_partial,
+      });
+    }
+    return indexes;
+  }
+  if (connection.dialect === 'mysql') {
+    const rows = await queryInformationSchema<{
+      table_name: string;
+      index_name: string;
+      column_name: string;
+      non_unique: number;
+    }>(
+      connection,
+      'select table_name as table_name, index_name as index_name, ' +
+        'column_name as column_name, non_unique as non_unique ' +
         'from information_schema.statistics ' +
-        `where table_schema = ${connection.escape(catalogName)}`
-      : 'select tbl_name as table_name, name as index_name ' +
-        "from sqlite_master where type = 'index'";
+        `where table_schema = ${connection.escape(catalogName)} ` +
+        'order by table_name, index_name, seq_in_index'
+    );
+    for (const row of rows) {
+      add(row.table_name, row.index_name, row.column_name, {
+        unique: !Number(row.non_unique),
+      });
+    }
+    return indexes;
+  }
+  if (connection.dialect === 'sqlite3') {
+    const names = await queryInformationSchema<{
+      table_name: string;
+      index_name: string;
+    }>(
+      connection,
+      'select tbl_name as table_name, name as index_name ' +
+        "from sqlite_master where type = 'index'"
+    );
+    const flags = new Map<string, { unique: boolean; partial: boolean }>();
+    const listed = new Set<string>();
+    for (const entry of names) {
+      if (!listed.has(entry.table_name)) {
+        listed.add(entry.table_name);
+        const list = await queryInformationSchema<{
+          name: string;
+          is_unique: number;
+          is_partial: number;
+        }>(
+          connection,
+          'select name, "unique" as is_unique, "partial" as is_partial ' +
+            `from pragma_index_list(${connection.escape(entry.table_name)})`
+        );
+        for (const item of list) {
+          flags.set(`${entry.table_name}.${item.name}`, {
+            unique: Boolean(item.is_unique),
+            partial: Boolean(item.is_partial),
+          });
+        }
+      }
+      const columns = await queryInformationSchema<{ name: string | null }>(
+        connection,
+        `select * from pragma_index_info(${connection.escape(entry.index_name)})`
+      );
+      indexes.set(`${entry.table_name}.${entry.index_name}`, {
+        columns: columns
+          .map(column => column.name)
+          .filter((name): name is string => name != null),
+        ...flags.get(`${entry.table_name}.${entry.index_name}`),
+      });
+    }
+    return indexes;
+  }
   const rows = await queryInformationSchema<{
     table_name: string;
     index_name: string;
-  }>(connection, sql);
-  return new Set(rows.map(row => `${row.table_name}.${row.index_name}`));
+  }>(
+    connection,
+    'select tbl_name as table_name, name as index_name ' +
+      "from sqlite_master where type = 'index'"
+  );
+  for (const row of rows) add(row.table_name, row.index_name, null);
+  return indexes;
+}
+
+interface LiveCheck {
+  name: string;
+  expression: string;
+}
+
+// Live table-level check constraints as `table => checks`. Expressions are
+// dialect-normalised (postgres rewrites them), so callers match by name.
+// SQLite keeps checks in the table DDL only and cannot alter them in place,
+// so it reports none and callers skip the comparison entirely.
+async function getLiveChecks(
+  connection: Connection,
+  catalogName: string,
+  schemaName?: string
+): Promise<Map<string, LiveCheck[]>> {
+  const checks = new Map<string, LiveCheck[]>();
+  if (connection.dialect !== 'postgres' && connection.dialect !== 'mysql') {
+    return checks;
+  }
+  const rows = connection.dialect === 'postgres'
+    ? await queryInformationSchema<{
+        table_name: string;
+        constraint_name: string;
+        definition: string;
+      }>(
+        connection,
+        'select c.relname as table_name, con.conname as constraint_name, ' +
+          'pg_get_constraintdef(con.oid) as definition ' +
+          'from pg_constraint con ' +
+          'join pg_class c on c.oid = con.conrelid ' +
+          'join pg_namespace n on n.oid = c.relnamespace ' +
+          "where con.contype = 'c' and n.nspname = " +
+          connection.escape(schemaName || 'public')
+      )
+    : await queryInformationSchema<{
+        table_name: string;
+        constraint_name: string;
+        definition: string;
+      }>(
+        connection,
+        'select tc.table_name as table_name, ' +
+          'cc.constraint_name as constraint_name, ' +
+          'cc.check_clause as definition ' +
+          'from information_schema.check_constraints cc ' +
+          'join information_schema.table_constraints tc ' +
+          'on tc.constraint_name = cc.constraint_name ' +
+          'and tc.constraint_schema = cc.constraint_schema ' +
+          "and tc.constraint_type = 'CHECK' " +
+          'where cc.constraint_schema = ' +
+          connection.escape(catalogName)
+      );
+  for (const row of rows) {
+    const table = checks.get(row.table_name) || [];
+    table.push({ name: row.constraint_name, expression: row.definition });
+    checks.set(row.table_name, table);
+  }
+  return checks;
 }
 
 function columnDifference(
@@ -1589,6 +1931,67 @@ function normalizeColumnType(type: string, dialect: Dialect): string {
   if (/^(timestamp.*|datetime)$/.test(value)) return 'datetime';
   if (/^(character varying|varchar)$/.test(value)) return 'varchar';
   return value;
+}
+
+// SQLite stores check constraints only in the table DDL and cannot add or
+// drop them in place, so reconcile leaves them to explicit rebuilds.
+function supportsChecks(dialect: Dialect): boolean {
+  return dialect === 'postgres' || dialect === 'mysql';
+}
+
+// The inline check backing a non-native enum column is auto-named by the
+// engine after the column (`<table>_<column>_check`) and is emitted by the
+// column DDL, not declared in `checks`; reconcile must not treat it as stale.
+function implicitEnumCheckNames(table: MigrationTable): Set<string> {
+  const names = new Set<string>();
+  for (const column of table.columns) {
+    if (
+      column.type.toLowerCase() === 'enum' &&
+      column.userDefinedType?.values.length
+    ) {
+      names.add(`${table.name}_${column.name}_check`);
+    }
+  }
+  return names;
+}
+
+function indexDifference(
+  actual: LiveIndex,
+  expected: MigrationIndex,
+  table: string
+): string | undefined {
+  const label = `index ${table}.${expected.name}`;
+  // Empty columns mean the dialect reports index names only, so there is
+  // nothing to compare beyond existence.
+  if (
+    actual.columns.length &&
+    stableStringify(actual.columns) !== stableStringify(expected.columns)
+  ) {
+    return (
+      `${label} covers ${actual.columns.join(', ')}, ` +
+      `expected ${expected.columns.join(', ')}`
+    );
+  }
+  if (
+    actual.unique !== undefined &&
+    Boolean(actual.unique) !== Boolean(expected.unique)
+  ) {
+    return (
+      `${label} is ${actual.unique ? 'unique' : 'not unique'}, ` +
+      `expected ${expected.unique ? 'unique' : 'not unique'}`
+    );
+  }
+  // The predicate text is dialect-normalised, so only its presence is compared.
+  if (
+    actual.partial !== undefined &&
+    Boolean(actual.partial) !== Boolean(expected.where)
+  ) {
+    return (
+      `${label} is ${actual.partial ? 'partial' : 'not partial'}, ` +
+      `expected ${expected.where ? 'partial' : 'not partial'}`
+    );
+  }
+  return undefined;
 }
 
 function sameConstraintShape(

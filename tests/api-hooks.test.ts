@@ -77,6 +77,8 @@ async function makeOrder(status = 1): Promise<Document> {
 beforeAll(async () => {
   await helper.createDatabase(NAME);
   db = new Database(helper.createTestConnectionPool(NAME), new Schema(helper.getExampleData()));
+  // A stand-in outbox for the atomic side-write tests; no key needed.
+  await db.query('create table hook_outbox (order_id integer, note varchar(80))');
 });
 
 afterAll(async () => {
@@ -197,6 +199,167 @@ describe('beforeWrite', () => {
     expect(response.status).toBe(500);
     expect(JSON.stringify(await response.json())).not.toContain('secret');
     expect(errors).toHaveLength(1);
+  });
+});
+
+describe('beforeWrite connection', () => {
+  // hook_outbox is not part of the bound schema; read it with raw SQL.
+  const outboxRows = (note: string) =>
+    db.query<Array<{ note: string }>>('select note from hook_outbox where note = ?', note);
+
+  test('every write receives the transaction connection', async () => {
+    const seen: Array<string | undefined> = [];
+    const api = createApi<Context>(db, {
+      basePath: '/api',
+      resources: {
+        Order: {
+          operations: ['create', 'update', 'delete'],
+          write: { fields: ['code', 'status'] },
+          assign: () => ({ user: 3 }),
+          beforeWrite: (context, { operation, connection }) => {
+            seen.push(connection ? operation : undefined);
+          },
+        },
+        User: {},
+      },
+    });
+    const created = await send(
+      api, 'POST', '/api/orders',
+      { code: `cx-${Math.floor(Math.random() * 1e6)}`, status: 1 },
+      { role: 'staff' }
+    );
+    expect(created.status).toBe(201);
+    const id = (((await created.json()) as Document).data as Document).id;
+    expect((await send(api, 'PATCH', `/api/orders/${id}`, { status: 2 }, { role: 'staff' })).status).toBe(200);
+    expect((await send(api, 'DELETE', `/api/orders/${id}`, undefined, { role: 'staff' })).status).toBe(204);
+    expect(seen).toEqual(['create', 'update', 'delete']);
+  });
+
+  test('a hook side-write commits with the write it accompanies', async () => {
+    const api = createApi<Context>(db, {
+      basePath: '/api',
+      resources: {
+        Order: {
+          operations: ['create'],
+          write: { fields: ['code'] },
+          assign: () => ({ user: 3 }),
+          beforeWrite: async (context, { data, connection }) => {
+            // The outbox row rides the write's own transaction.
+            await connection!.query(
+              'insert into hook_outbox (order_id, note) values (?, ?)',
+              0,
+              String(data.code)
+            );
+          },
+        },
+        User: {},
+      },
+    });
+    const code = `outbox-${Math.floor(Math.random() * 1e6)}`;
+    expect((await send(api, 'POST', '/api/orders', { code }, { role: 'staff' })).status).toBe(201);
+    expect(await outboxRows(code)).toHaveLength(1);
+  });
+
+  test('a refused write rolls the hook side-write back', async () => {
+    const api = createApi<Context>(db, {
+      basePath: '/api',
+      resources: {
+        Order: {
+          operations: ['create'],
+          write: { fields: ['code'] },
+          assign: () => ({ user: 3 }),
+          beforeWrite: async (context, { data, connection }) => {
+            await connection!.query(
+              'insert into hook_outbox (order_id, note) values (?, ?)',
+              0,
+              String(data.code)
+            );
+            throw ApiError.unprocessable('refused after the side-write');
+          },
+        },
+        User: {},
+      },
+    });
+    const code = `rolled-back-${Math.floor(Math.random() * 1e6)}`;
+    const refused = await send(api, 'POST', '/api/orders', { code }, { role: 'staff' });
+    expect(refused.status).toBe(422);
+    expect(await outboxRows(code)).toHaveLength(0);
+  });
+});
+
+describe('afterCommit', () => {
+  test('runs with the committed row, only for writes that landed', async () => {
+    const events: Document[] = [];
+    const api = createApi<Context>(db, {
+      basePath: '/api',
+      resources: {
+        Order: {
+          operations: ['create', 'update', 'delete'],
+          write: { fields: ['code', 'status'] },
+          assign: () => ({ user: 3 }),
+          beforeWrite: (context, { operation, data }) => {
+            // a refusal must not reach afterCommit
+            if (operation === 'create' && data.code === 'refuse-me') {
+              throw ApiError.unprocessable('no');
+            }
+          },
+          afterCommit: (context, { operation, row }) => {
+            events.push({ operation, id: row?.id ?? null, status: row?.status ?? null });
+          },
+        },
+        User: {},
+      },
+    });
+
+    const refused = await send(api, 'POST', '/api/orders', { code: 'refuse-me' }, { role: 'staff' });
+    expect(refused.status).toBe(422);
+    expect(events).toEqual([]);
+
+    const created = await send(
+      api, 'POST', '/api/orders',
+      { code: `commit-${Math.floor(Math.random() * 1e6)}`, status: 1 },
+      { role: 'staff' }
+    );
+    expect(created.status).toBe(201);
+    const id = (((await created.json()) as Document).data as Document).id;
+    // awaited before the response: the event is already recorded
+    expect(events).toEqual([{ operation: 'create', id, status: 1 }]);
+
+    await send(api, 'PATCH', `/api/orders/${id}`, { status: 3 }, { role: 'staff' });
+    expect(events[1]).toEqual({ operation: 'update', id, status: 3 });
+
+    await send(api, 'DELETE', `/api/orders/${id}`, undefined, { role: 'staff' });
+    expect(events[2]).toMatchObject({ operation: 'delete', id });
+    expect(events).toHaveLength(3);
+  });
+
+  test('sees committed state, and a failure is logged, not served', async () => {
+    const api = createApi<Context>(db, {
+      basePath: '/api',
+      resources: {
+        Order: {
+          operations: ['create'],
+          write: { fields: ['code'] },
+          assign: () => ({ user: 3 }),
+          afterCommit: async (context, { row }) => {
+            // readable through a fresh connection: the transaction is over
+            const rows = await db.table('order').select<Document>('*', {
+              where: { id: row?.id as number },
+            });
+            if (!rows.length) throw Error('row not committed');
+            throw Error('side effect blew up');
+          },
+        },
+        User: {},
+      },
+    });
+    const response = await send(
+      api, 'POST', '/api/orders',
+      { code: `committed-${Math.floor(Math.random() * 1e6)}` },
+      { role: 'staff' }
+    );
+    // the write happened; the hook's failure does not fail the response
+    expect(response.status).toBe(201);
   });
 });
 

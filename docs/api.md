@@ -354,6 +354,7 @@ createApi(db, {
 | `assign` | none | Values the server sets on writes |
 | `authorize` | none | Per-request operation gate |
 | `beforeWrite` | none | Value-level rules and transforms |
+| `afterCommit` | none | Side effects for committed writes only |
 | `afterRead` | none | Response transforms and redaction |
 
 `defaults` sets `operators`, `includeMaxDepth`, `includeLimit` and `page` for
@@ -434,18 +435,34 @@ assign: (context, operation) => ({
 
 ### Value-level rules and response transforms
 
-Two hooks cover what the declarative policy cannot say:
+Three hooks cover what the declarative policy cannot say:
 
 ```js
-// After validation and assign; for update and delete, inside the transaction
-// with the current row in hand. `body` is what the client sent, `data` what
-// would be written (with assign applied). Throw an ApiError to refuse; return
-// a document to replace the data.
-beforeWrite: (context, { operation, data, body, row }) => {
+// After validation and assign, inside the write's transaction: the current
+// row (update and delete) and the transaction's connection are in hand.
+// `body` is what the client sent, `data` what would be written (with assign
+// applied). Throw an ApiError to refuse; return a document to replace the
+// data. Reads through `connection` see the transaction's own uncommitted
+// work and can lock the rows they validate (`select ... for update`); rows
+// inserted through it commit or roll back atomically with the write — the
+// outbox pattern:
+beforeWrite: async (context, { operation, data, body, row, connection }) => {
   if (context.role === 'customer' && body.status !== undefined) {
     if (body.status !== 'cancelled') throw ApiError.unprocessable('customers may only cancel');
     if (row.status !== 'open') throw ApiError.unprocessable('only an open order can be cancelled');
   }
+  if (operation === 'update' && connection) {
+    await connection.query('insert into outbox (order_id) values (?)', row.id);
+  }
+},
+
+// After the transaction commits, and only then: a refused or rolled-back
+// write never reaches it. `row` is the committed row (created, changed, or
+// deleted). For side effects that must not happen for a write that did not
+// land — queueing derived work, notifications, cache invalidation. A throw
+// here is logged, not served: the write already happened.
+afterCommit: async (context, { operation, row }) => {
+  await queues.publish('order.changed', { id: row.id, operation });
 },
 
 // After serialisation, wherever a row of this resource is served: lists,
@@ -456,10 +473,11 @@ afterRead: (context, row) => {
 },
 ```
 
-A `beforeWrite` refusal thrown inside an update or delete rolls the transaction
-back; anything thrown that is not an `ApiError` is a bare `500` handed to
-`onError`. An `afterRead` redaction cannot be reached around through an
-`include`, because each resource's hook follows its rows into embeds.
+A `beforeWrite` refusal rolls the write's transaction back, including anything
+the hook itself wrote through `connection`; anything thrown that is not an
+`ApiError` is a bare `500` handed to `onError`. An `afterRead` redaction
+cannot be reached around through an `include`, because each resource's hook
+follows its rows into embeds.
 
 See [Multi-tenancy](./multi-tenancy.md) for the complete pattern.
 

@@ -101,26 +101,33 @@ it as a package script:
 
 Reconciling creates missing tables (with their constraints, checks, and
 indexes), adds missing columns that are nullable or have a default, and adds
-missing constraints and indexes to existing tables. Indexes are matched by
-name. The returned array holds the executed SQL; it is empty when the database
-already matches.
+missing constraints, checks, and indexes to existing tables. Indexes are matched
+by name and then compared by their columns, uniqueness, and whether they are
+partial; check constraints are matched by name (engines rewrite the expression
+text, so a changed expression under the same name is not treated as drift). The
+returned array holds the executed SQL; it is empty when the database already
+matches.
 
 By default anything else is reported in one error before any DDL runs: a
 required column without a default, a column whose type, nullability,
-generation, dimensions, default, or enum values differ from the declaration,
-and a column or constraint in a declared table that the declaration does not
-mention. With `destructive: true`, changed columns are altered in place and
-undeclared columns and constraints are dropped; existing data may be cast,
-truncated, or lost, so preview with `dryRun` first. A renamed field is a drop
-plus an add, not a rename.
+generation, dimensions, default, or enum values differ from the declaration, an
+index whose definition differs from the declaration, and a column, constraint,
+or check constraint in a declared table that the declaration does not mention.
+With `destructive: true`, changed columns are altered in place, drifted indexes
+are dropped and recreated, and undeclared columns, constraints, and checks are
+dropped; existing data may be cast, truncated, or lost, so preview with `dryRun`
+first. A renamed field is a drop plus an add, not a rename.
 
-Not compared: index definitions (only names), comments, check constraints on
-existing tables, and enum values stored as text with a check. Tables the
-declarations do not mention are never touched. Dialect limits apply as for
-migrations: SQLite cannot alter columns or add or drop constraints in place, or
-add columns with non-constant defaults; PostgreSQL cannot make an existing
-column generated, which is reported rather than attempted; MySQL commits DDL
-implicitly, so a statement failing mid-run leaves the earlier ones applied.
+Not compared: index predicate text and comments. The inline check that stands in
+for an enum stored as text belongs to its column and is never reported as
+undeclared. Check constraints are only introspected on PostgreSQL and MySQL;
+SQLite keeps them in the table DDL and cannot add or drop them in place, so
+reconcile leaves them to explicit rebuilds there. Tables the declarations do not
+mention are never touched. Dialect limits apply as for migrations: SQLite cannot
+alter columns or add or drop constraints in place, or add columns with
+non-constant defaults; PostgreSQL cannot make an existing column generated,
+which is reported rather than attempted; MySQL commits DDL implicitly, so a
+statement failing mid-run leaves the earlier ones applied.
 
 ## Manual migrations
 
@@ -155,6 +162,8 @@ raw SQL. Raw SQL always requires an explicit down operation.
 | `operation.dropConstraint(table, constraint)` | Drop a named constraint |
 | `operation.createIndex(table, index)` | Create an index |
 | `operation.dropIndex(table, index)` | Drop an index |
+| `operation.addCheck(table, check)` | Add a named check constraint |
+| `operation.dropCheck(table, name)` | Drop a check constraint |
 | `operation.sql(statementOrStatements)` | Execute explicit SQL |
 
 ## Dialect behavior

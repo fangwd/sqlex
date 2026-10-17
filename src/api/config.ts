@@ -1,4 +1,5 @@
 import { Filter } from '../database';
+import type { Connection } from '../engine';
 import { Document } from '../types';
 
 /** Operations a resource can expose. */
@@ -94,20 +95,46 @@ export interface WriteEvent {
   data: Document;
   /** The validated body as the client sent it, before `assign`. */
   body: Document;
-  /** The stored row, as sqlex returns it, for update and delete. */
+  /**
+   * The stored row, as sqlex returns it. For `beforeWrite` on update and
+   * delete it is the row before the change; for `afterCommit` it is the row
+   * as committed (created, changed, or deleted).
+   */
   row?: Document;
+  /**
+   * The write's transaction connection, for `beforeWrite` only: reads it
+   * performs join the write's transaction (so a check sees uncommitted work
+   * and can lock the rows it validated), and rows it inserts commit or roll
+   * back atomically with the write. Absent in `afterCommit` — the transaction
+   * is over by then.
+   */
+  connection?: Connection;
 }
 
 /**
- * Value-level rules, running after validation and `assign`, and for update and
- * delete inside the write's transaction with the current row in hand. Returning
- * a document replaces the data; throwing an ApiError refuses the write with
- * that status.
+ * Value-level rules, running after validation and `assign`, inside the
+ * write's transaction with the current row (update and delete) and the
+ * transaction's connection in hand. Returning a document replaces the data;
+ * throwing an ApiError refuses the write with that status and rolls back
+ * anything the hook itself wrote.
  */
 export type BeforeWriteFn<TContext> = (
   context: TContext,
   write: WriteEvent
 ) => void | Document | Promise<void | Document>;
+
+/**
+ * Side effects that must happen only for a committed write: cache invalidation,
+ * notifications, queueing derived work. Runs after the transaction commits,
+ * with the committed row in `write.row`; it never runs for a refused or rolled
+ * back write. It is awaited before the response is sent, but a throwing
+ * `afterCommit` is logged rather than served as an error — the write it
+ * follows already happened.
+ */
+export type AfterCommitFn<TContext> = (
+  context: TContext,
+  write: WriteEvent
+) => void | Promise<void>;
 
 /**
  * Transforms a row as it is served — after serialisation, so wire shapes are
@@ -183,6 +210,7 @@ export interface ResourceConfig<TContext = unknown> {
   assign?: AssignFn<TContext>;
   authorize?: AuthorizeFn<TContext>;
   beforeWrite?: BeforeWriteFn<TContext>;
+  afterCommit?: AfterCommitFn<TContext>;
   afterRead?: AfterReadFn<TContext>;
 }
 
