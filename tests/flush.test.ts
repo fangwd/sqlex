@@ -1,6 +1,7 @@
 import { Schema } from '../src/schema';
 import { Database } from '../src/database';
 import { Record, runtimeOf, type DynamicRecord } from '../src/record';
+import { SELECT_BATCH_SIZE } from '../src/flush';
 
 import * as helper from './helper';
 import type { UserRow } from './schema-types';
@@ -855,5 +856,28 @@ test('record sets require unique fields', async () => {
   const db = helper.connectToDatabase(NAME);
   const rec = db.table('order').append();
   await expect(rec.orderItems.all()).rejects.toThrow('unique fields');
+  await db.end();
+});
+
+test('flush resolves existing rows across lookup batches', async () => {
+  const schema = new Schema(helper.getExampleData());
+  const db = helper.connectToDatabase(NAME, schema);
+  const table = db.table('user');
+  const count = SELECT_BATCH_SIZE * 2 + 10;
+  const email = (i: number) => `batch-${i}@example.com`;
+  // rows that already exist, one in each lookup batch
+  const existing = [0, SELECT_BATCH_SIZE, SELECT_BATCH_SIZE * 2 + 5];
+  const ids = new Map<number, unknown>();
+  for (const i of existing) ids.set(i, await table.insert({ email: email(i), status: 1 }));
+
+  for (let i = 0; i < count; i++) table.append({ email: email(i), status: 7 });
+  await db.flush();
+
+  const rows = await table.select('*', { where: { email_like: 'batch-%' } });
+  expect(rows.length).toBe(count);
+  expect(rows.every((row: any) => row.status === 7)).toBe(true);
+  for (const i of existing) {
+    expect((await table.get({ email: email(i) })).id).toBe(ids.get(i));
+  }
   await db.end();
 });

@@ -231,6 +231,9 @@ function flushTable(
   });
 }
 
+/** Records whose existing rows one flush lookup statement resolves. */
+export const SELECT_BATCH_SIZE = 1000;
+
 function _flushTable(
   connection: Connection,
   table: Table,
@@ -267,35 +270,37 @@ function _flushTable(
     nameSet.add(model.keyField()!.name);
   }
 
-  function _select(): Promise<any> {
-    if (filter.length === 0) return Promise.resolve();
+  async function _select(): Promise<void> {
+    if (filter.length === 0) return;
     const fields = model.fields.filter(field => nameSet.has(field.name));
     const columns = fields.map(field => dialect.escapeId((field as SimpleField).column.name));
     const from = dialect.escapeId(model.table.name);
-    const where = encodeFilter(
-      filter.map(r => runtimeOf(r).filter()),
-      table.model,
-      dialect,
-      table.db.operatorMap,
-      table.db.jsonFilterOptions
-    );
-    const query = `select ${columns.join(',')} from ${from} where ${where}`;
-    return connection._query(query).then(rows => {
-      const map = makeMapTable(table);
+    const map = makeMapTable(table);
+    // One OR term per record: a single statement for tens of thousands of
+    // records makes the database's planning time grow far faster than linearly.
+    for (let start = 0; start < filter.length; start += SELECT_BATCH_SIZE) {
+      const where = encodeFilter(
+        filter.slice(start, start + SELECT_BATCH_SIZE).map(r => runtimeOf(r).filter()),
+        table.model,
+        dialect,
+        table.db.operatorMap,
+        table.db.jsonFilterOptions
+      );
+      const rows = await connection._query(`select ${columns.join(',')} from ${from} where ${where}`);
       rows.forEach((row: Row) => map.append(toDocument(row, table.model)));
-      for (const record of table.recordList) {
-        if (!runtimeOf(record).isDirty()) continue;
-        const existing = map._mapGet(record);
-        if (existing) {
-          runtimeOf(record).updateState(existing);
-        }
+    }
+    for (const record of table.recordList) {
+      if (!runtimeOf(record).isDirty()) continue;
+      const existing = map._mapGet(record);
+      if (existing) {
+        runtimeOf(record).updateState(existing);
       }
-      for (const record of filter) {
-        if (runtimeOf(record).connect) {
-          runtimeOf(record).state.selected = true;
-        }
+    }
+    for (const record of filter) {
+      if (runtimeOf(record).connect) {
+        runtimeOf(record).state.selected = true;
       }
-    });
+    }
   }
 
   let insertCount = 0;
