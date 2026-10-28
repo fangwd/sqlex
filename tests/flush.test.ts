@@ -881,3 +881,36 @@ test('flush resolves existing rows across lookup batches', async () => {
   }
   await db.end();
 });
+
+test('a flush retried after a conflict writes again what the rolled-back attempt had written', async () => {
+  const schema = new Schema(helper.getExampleData());
+  const db = helper.connectToDatabase(NAME, schema);
+  const user = db.table('user').append({ email: 'retried@example.com' });
+  db.table('order').append({ code: 'retried-order', user });
+  // the first order insert meets a row a concurrent flush committed meanwhile:
+  // the transaction rolls back after the user row was inserted
+  let conflicts = 0;
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = connection._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      if (conflicts === 0 && /^insert into [`"]order[`"]/.test(sql)) {
+        conflicts++;
+        return Promise.reject(new Error("Duplicate entry 'retried-order' for key 'code'"));
+      }
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+
+  await db.flush();
+
+  expect(conflicts).toBe(1);
+  const saved = await db.table('user').get({ email: 'retried@example.com' });
+  const order = await db.table('order').get({ code: 'retried-order' });
+  expect(order.user.id).toBe(saved.id);
+  expect(user.id).toBe(saved.id);
+  jest.restoreAllMocks();
+  await db.end();
+});

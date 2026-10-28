@@ -208,27 +208,36 @@ function flushTable(
     return Promise.resolve(0);
   }
 
-  const states: { data: { [key: string]: FieldValue }; state: FlushState }[] = [];
+  return _flushTable(connection, table, perfect);
+}
 
-  for (let i = 0; i < table.recordList.length; i++) {
-    const record = table.recordList[i];
-    states.push({
-      data: { ...runtimeOf(record).data },
-      state: runtimeOf(record).state.clone()
-    });
-  }
-
-  return _flushTable(connection, table, perfect).catch(error => {
-    for (let i = 0; i < table.recordList.length; i++) {
-      const record = table.recordList[i];
-      if (runtimeOf(record).isDirty()) {
-        const state = states[i];
-        runtimeOf(record).data = { ...state.data };
-        runtimeOf(record).state = state.state.clone();
+/**
+ * Every table's records and every record's flush state, and a function that
+ * puts them back. A transaction that rolls back undoes the rows its inserts
+ * wrote, so the records those inserts touched - in every table, not only the one
+ * that failed - must forget their new ids and be written again by the retry.
+ */
+function snapshot(db: Database): () => void {
+  const tables = db.tableList.map(table => ({
+    table,
+    recordList: [...table.recordList],
+    recordMap: Object.fromEntries(Object.entries(table.recordMap).map(([key, map]) => [key, { ...map }])),
+    records: table.recordList.map(record => {
+      const runtime = runtimeOf(record);
+      return { runtime, data: { ...runtime.data }, state: runtime.state.clone(), inserted: runtime.inserted };
+    })
+  }));
+  return () => {
+    for (const { table, recordList, recordMap, records } of tables) {
+      table.recordList = [...recordList];
+      table.recordMap = Object.fromEntries(Object.entries(recordMap).map(([key, map]) => [key, { ...map }]));
+      for (const { runtime, data, state, inserted } of records) {
+        runtime.data = { ...data };
+        runtime.state = state.clone();
+        runtime.inserted = inserted;
       }
     }
-    throw error;
-  });
+  };
 }
 
 /** Records whose existing rows one flush lookup statement resolves. */
@@ -536,6 +545,7 @@ export function flushDatabase(
   return new Promise((resolve, reject) => {
     let perfect = true;
     const _flush = () => {
+      const restore = snapshot(db);
       connection.transaction(() => {
         afterBegin(connection)
           .then(() =>
@@ -554,6 +564,7 @@ export function flushDatabase(
           )
           .catch((error: unknown) => {
             connection.rollback().then(() => {
+              restore();
               if (perfect && isIntegrityError(error)) {
                 perfect = false;
                 setTimeout(_flush, Math.random() * 1000);
