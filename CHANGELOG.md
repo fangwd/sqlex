@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [5.0.0]
+
+### Changed
+
+- A flush owns the records it writes until commit or rollback: changing,
+  saving, or deleting them, or flushing them again, throws `... is being
+  flushed`, and generated IDs and other changes are applied only after commit,
+  with a failed flush rejecting with the original database error and its
+  `code`.
+- A flush that hits a deadlock, serialization failure, lock-wait timeout, or
+  busy/locked database gives up after eight classified, jittered retries
+  instead of retrying indefinitely, and an incomplete flush reports the
+  specific `Circular references: <table.field -> ...>` or `Incomplete data`.
+- PostgreSQL bulk flushes use `INSERT ... ON CONFLICT DO NOTHING` and batched
+  updates for the common table shapes, tables are written parent-first along
+  required foreign keys, and `record.delete()` is now `async`.
+
 ## [4.9.0]
 
 ### Added

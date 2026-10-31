@@ -227,7 +227,7 @@ test('flush #3', async() => {
 
   const { connection } = await db.flush();
 
-  expect(connection.queryCounter.total).toBe(10);
+  expect(connection.queryCounter.total).toBeLessThanOrEqual(10);
 
   {
     const user = await db.table('user').get({ email });
@@ -893,7 +893,9 @@ test('a flush retried after a conflict writes again what the rolled-back attempt
   const getConnection = db.pool.getConnection.bind(db.pool);
   jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
     const connection = await getConnection();
-    const query = connection._query.bind(connection);
+    // SQLite reuses this connection when the transaction is retried. Bind the
+    // real method, not a spy installed by the previous attempt.
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
     jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
       if (conflicts === 0 && /^insert into [`"]order[`"]/.test(sql)) {
         conflicts++;
@@ -909,8 +911,509 @@ test('a flush retried after a conflict writes again what the rolled-back attempt
   expect(conflicts).toBe(1);
   const saved = await db.table('user').get({ email: 'retried@example.com' });
   const order = await db.table('order').get({ code: 'retried-order' });
-  expect(order.user.id).toBe(saved.id);
+  expect(order.user!.id).toBe(saved.id);
   expect(user.id).toBe(saved.id);
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL bulk flush maps returned IDs by key, independent of row order', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const first = db.table('user').append({ email: 'returned-first@example.com' });
+  const second = db.table('user').append({ email: 'returned-second@example.com' });
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = connection._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation(async (sql: string, ...rest: any[]) => {
+      const result = await (query as any)(sql, ...rest);
+      return /^insert into "user"/.test(sql) && /on conflict/.test(sql) && Array.isArray(result)
+        ? [...result].reverse()
+        : result;
+    });
+    return connection;
+  });
+
+  await db.flush();
+  expect(first.id).toBe((await db.table('user').get({ email: first.email })).id);
+  expect(second.id).toBe((await db.table('user').get({ email: second.email })).id);
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL overlapping bulk flushes resolve unique keys without transaction retries', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const schema = new Schema(helper.getExampleData());
+  const dbs = [helper.connectToDatabase(NAME, schema), helper.connectToDatabase(NAME, schema)];
+  const prefix = helper.getId();
+  const records = dbs.map((db, index) => Array.from({ length: 180 }, (_, i) =>
+    db.table('user').append({ email: `${prefix}-${i}@example.com`, firstName: `writer-${index}` })
+  ));
+  let waiting = 0;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let rollbacks = 0;
+  for (const db of dbs) {
+    const getConnection = db.pool.getConnection.bind(db.pool);
+    jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+      const connection = await getConnection();
+      const query = connection._query.bind(connection);
+      jest.spyOn(connection, '_query').mockImplementation(async (sql: string, ...rest: any[]) => {
+        if (/^rollback$/i.test(sql)) rollbacks++;
+        if (/^insert into "user"/.test(sql) && /on conflict/.test(sql) && ++waiting <= 2) {
+          if (waiting === 2) release();
+          await gate;
+        }
+        return (query as any)(sql, ...rest);
+      });
+      return connection;
+    });
+  }
+
+  const results = await Promise.all(dbs.map(db => db.flush()));
+  expect(rollbacks).toBe(0);
+  for (const { connection } of results) {
+    expect(connection.queryCounter.total).toBeLessThan(20);
+  }
+  for (let i = 0; i < 180; i++) {
+    expect(records[0][i].id).toBe(records[1][i].id);
+  }
+  const saved = await dbs[0].table('user').select('*', { where: { email_like: `${prefix}-%` } });
+  expect(saved.length).toBe(180);
+  jest.restoreAllMocks();
+  await Promise.all(dbs.map(db => db.end()));
+});
+
+test('PostgreSQL bulk flush resolves composite foreign-key keys', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = await db.table('user').insert({ email: `${helper.getId()}@example.com` });
+  const group = await db.table('group').insert({ name: helper.getId() });
+  const table = db.table('user_group');
+  const first = table.append({ user, group });
+  await db.flush();
+  const id = first.id;
+  db.clear();
+  const second = table.append({ user, group });
+  await db.flush();
+  expect(second.id).toBe(id);
+  expect((await table.select('*', { where: { id } })).length).toBe(1);
+  await db.end();
+});
+
+test('bulk flush updates the natural key of a record with a supplied primary key', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const id = await db.table('user').insert({ email: `${helper.getId()}@example.com` });
+  const email = `${helper.getId()}-renamed@example.com`;
+  db.table('user').append({ id, email });
+  await db.flush();
+  expect((await db.table('user').get({ id })).email).toBe(email);
+  await db.end();
+});
+
+test('PostgreSQL bulk flush skips the update when conflicting values are unchanged', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const code = helper.getId();
+  const dateCreated = new Date('2026-01-02T03:04:05.000Z');
+  await db.table('order').insert({ code, dateCreated });
+  const sku = helper.getId();
+  const config = { a: 1, b: [1, 2] };
+  await db.table('product').insert({ sku, config });
+  db.table('order').append({ code, dateCreated });
+  db.table('product').append({ sku, config });
+  const updates: string[] = [];
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = connection._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      if (/^update /.test(sql)) updates.push(sql);
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+
+  await db.flush();
+  expect(updates).toEqual([]);
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL bulk flush updates array columns after a key conflict', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema({ name: '', tables: [{
+    name: 'flush_tagged',
+    columns: [
+      { name: 'id', type: 'integer', nullable: false, autoIncrement: true },
+      { name: 'name', type: 'varchar', size: 60, nullable: false },
+      { name: 'tags', type: 'text[]', nullable: true },
+    ],
+    constraints: [{ primaryKey: true, columns: ['id'] }, { unique: true, columns: ['name'] }],
+  }] }));
+  await db.query('create table flush_tagged (id serial primary key, name varchar(60) not null unique, tags text[])');
+  await db.query(`insert into flush_tagged (name, tags) values ('first', '{a}')`);
+  db.table('flush_tagged').append({ name: 'first', tags: '{a,b}' });
+  await db.flush();
+  expect((await db.table('flush_tagged').get({ name: 'first' })).tags).toEqual(['a', 'b']);
+  await db.end();
+});
+
+test('PostgreSQL bulk flush retries when a conflicting row is deleted mid-attempt', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const email = `${helper.getId()}@example.com`;
+  await db.table('user').insert({ email });
+  const user = db.table('user').append({ email, firstName: 'retried' });
+  let deleted = false;
+  let rollbacks = 0;
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = connection._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation(async (sql: string, ...rest: any[]) => {
+      if (/^rollback$/i.test(sql)) rollbacks++;
+      const result = await (query as any)(sql, ...rest);
+      if (!deleted && /^insert into "user"/.test(sql) && /on conflict/.test(sql)) {
+        deleted = true;
+        await db.table('user').delete({ email });
+      }
+      return result;
+    });
+    return connection;
+  });
+
+  await db.flush();
+  jest.restoreAllMocks();
+  expect(rollbacks).toBe(1);
+  const saved = await db.table('user').get({ email });
+  expect(saved.firstName).toBe('retried');
+  expect(user.id).toBe(saved.id);
+  await db.end();
+});
+
+test('PostgreSQL bulk flush honors insertOnly on a key conflict', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const email = `${helper.getId()}@example.com`;
+  const id = await db.table('user').insert({ email, firstName: 'original' });
+  const record = db.table('user').append({ email, firstName: 'replacement' });
+  runtimeOf(record).insertOnly = true;
+  await db.flush();
+  expect(record.id).toBe(id);
+  expect(runtimeOf(record).isInserted()).toBe(false);
+  expect((await db.table('user').get({ id })).firstName).toBe('original');
+  await db.end();
+});
+
+test('bulk flush keeps generated IDs private until commit', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  let entered!: () => void;
+  const inHook = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const flush = db.flush({ beforeCommit: async () => {
+    expect(user.id).toBeDefined();
+    entered();
+    await gate;
+  } });
+  await inHook;
+  expect(user.id).toBeUndefined();
+  release();
+  await flush;
+  expect(user.id).toBeDefined();
+  await db.end();
+});
+
+/** Starts a flush and resolves once it is paused in its beforeCommit hook. */
+async function pauseFlush(db: Database) {
+  let entered!: () => void;
+  const inHook = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const flush = db.flush({ beforeCommit: async () => {
+    entered();
+    await gate;
+  } });
+  await inHook;
+  return { flush, release };
+}
+
+test('a flush hook cannot save a record the flush owns', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const email = `${helper.getId()}@example.com`;
+  const user = db.table('user').append({ email });
+  await expect(db.flush({ beforeCommit: async () => {
+    user.firstName = 'hook';
+    await user.save();
+  } })).rejects.toThrow(/is being flushed/);
+  expect(user.id).toBeUndefined();
+  expect(await db.table('user').get({ email })).toBeFalsy();
+  // The failed flush released the record.
+  user.firstName = 'after';
+  await db.flush();
+  expect((await db.table('user').get({ email })).firstName).toBe('after');
+  await db.end();
+});
+
+test('saving or deleting a record rejects while its flush is in flight', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  const { flush, release } = await pauseFlush(db);
+  await expect(user.save()).rejects.toThrow(/is being flushed/);
+  await expect(user.delete()).rejects.toThrow(/is being flushed/);
+  release();
+  await flush;
+  expect(user.id).toBe((await db.table('user').get({ email: user.email })).id);
+  await db.end();
+});
+
+test('changing a record while its flush is in flight throws until the flush commits', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const email = `${helper.getId()}@example.com`;
+  const user = db.table('user').append({ email, firstName: 'before' });
+  const { flush, release } = await pauseFlush(db);
+  expect(() => { user.firstName = 'during'; }).toThrow(/is being flushed/);
+  expect(user.firstName).toBe('before');
+  release();
+  await flush;
+  user.firstName = 'after';
+  await db.flush();
+  expect((await db.table('user').get({ email })).firstName).toBe('after');
+  await db.end();
+});
+
+test('a second flush rejects records owned by a flush in flight', async () => {
+  // Two connections, so the second flush is not queued behind the first.
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()), 2);
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  const { flush, release } = await pauseFlush(db);
+  await expect(db.flush()).rejects.toThrow(/is being flushed/);
+  release();
+  await flush;
+  expect(user.id).toBe((await db.table('user').get({ email: user.email })).id);
+  await db.end();
+});
+
+test('callbacks scheduled by a flush hook see committed state after the flush', async () => {
+  const schema = new Schema(helper.getExampleData());
+  const db = helper.connectToDatabase(NAME, schema);
+  const other = helper.connectToDatabase(NAME, schema);
+  const bystander = other.table('user').append({ email: `${helper.getId()}@example.com` });
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com`, firstName: 'flushed' });
+  let late!: Promise<unknown>;
+  await db.flush({ beforeCommit: async () => {
+    late = new Promise(resolve => setTimeout(() => {
+      void bystander.email;
+      resolve(user.firstName);
+    }, 50));
+  } });
+  user.firstName = 'after';
+  expect(await late).toBe('after');
+  // The finished flush did not claim the record the callback read.
+  bystander.firstName = 'changed';
+  await db.end();
+  await other.end();
+});
+
+test('bulk flush leaves records unchanged when a transaction fails', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  db.table('order').append({ code: helper.getId(), user });
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) =>
+      /^insert into [`"]order[`"]/.test(sql)
+        ? Promise.reject(new Error('synthetic write failure'))
+        : (query as any)(sql, ...rest)
+    );
+    return connection;
+  });
+  await expect(db.flush()).rejects.toThrow('synthetic write failure');
+  expect(user.id).toBeUndefined();
+  expect(runtimeOf(user).isDirty()).toBe(true);
+  jest.restoreAllMocks();
+  await db.flush();
+  expect(user.id).toBeDefined();
+  await db.end();
+});
+
+test('bulk flush reports an unresolved record cycle immediately', async () => {
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const first = db.table('category').append({ name: helper.getId() });
+  const second = db.table('category').append({ name: helper.getId() });
+  first.parent = second;
+  second.parent = first;
+  await expect(db.flush()).rejects.toThrow(/Circular references: category\.parent/);
+  expect(first.id).toBeUndefined();
+  expect(second.id).toBeUndefined();
+  await db.end();
+});
+
+test('PostgreSQL retries a serialization failure with fresh record state', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  const order = db.table('order').append({ code: helper.getId(), user });
+  let failures = 0;
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      if (failures === 0 && /^insert into "order"/.test(sql)) {
+        failures++;
+        return Promise.reject(Object.assign(new Error('serialization failure'), { code: '40001' }));
+      }
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+  await db.flush();
+  expect(failures).toBe(1);
+  expect(user.id).toBeDefined();
+  expect((await db.table('order').get({ id: order.id })).user!.id).toBe(user.id);
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL does not retry an unrelated unique violation from the conflict writer', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  let writes = 0;
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      if (/^insert into "user"/.test(sql) && /on conflict/.test(sql)) {
+        writes++;
+        return Promise.reject(Object.assign(new Error('other unique index'), { code: '23505' }));
+      }
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+  await expect(db.flush()).rejects.toThrow('other unique index');
+  expect(writes).toBe(1);
+  expect(user.id).toBeUndefined();
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL bounds serialization retries and retains the original error', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  const failure = Object.assign(new Error('always serialize'), { code: '40001' });
+  let writes = 0;
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      if (/^insert into "user"/.test(sql)) {
+        writes++;
+        return Promise.reject(failure);
+      }
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+  await expect(db.flush()).rejects.toBe(failure);
+  expect(writes).toBe(8);
+  expect(user.id).toBeUndefined();
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL leaves ambiguous unique-key tables on the legacy writer', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const code = helper.getId();
+  const ecode = helper.getId();
+  const record = db.table('employee').append({ code, ecode, name: 'one' });
+  const queries: string[] = [];
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      queries.push(sql);
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+  await db.flush();
+  expect(record.id).toBeDefined();
+  expect(queries.some(sql => /^insert into "employee"/.test(sql) && /on conflict/.test(sql))).toBe(false);
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL leaves rows without a non-null natural key on the legacy writer', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const record = db.table('user').append({ email: null, firstName: helper.getId() });
+  const queries: string[] = [];
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      queries.push(sql);
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+  await db.flush();
+  expect(record.id).toBeDefined();
+  expect(queries.some(sql => /^insert into "user"/.test(sql) && /on conflict/.test(sql))).toBe(false);
+  jest.restoreAllMocks();
+  await db.end();
+});
+
+test('PostgreSQL reports a clash on another unique key without adopting the wrong row', async () => {
+  if (helper.DB_TYPE !== 'postgres') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const ecode = helper.getId();
+  await db.table('employee').insert({ code: helper.getId(), ecode });
+  const record = db.table('employee').append({ code: helper.getId(), ecode });
+  await expect(db.flush()).rejects.toMatchObject({ code: '23505' });
+  expect(record.id).toBeUndefined();
+  expect(runtimeOf(record).isDirty()).toBe(true);
+  await db.end();
+});
+
+test('SQLite constraint codes retain the one-time bulk fallback', async () => {
+  if (helper.DB_TYPE !== 'sqlite3') return;
+  const db = helper.connectToDatabase(NAME, new Schema(helper.getExampleData()));
+  const user = db.table('user').append({ email: `${helper.getId()}@example.com` });
+  const order = db.table('order').append({ code: helper.getId(), user });
+  let failures = 0;
+  const getConnection = db.pool.getConnection.bind(db.pool);
+  jest.spyOn(db.pool, 'getConnection').mockImplementation(async () => {
+    const connection = await getConnection();
+    const query = Object.getPrototypeOf(connection)._query.bind(connection);
+    jest.spyOn(connection, '_query').mockImplementation((sql: string, ...rest: any[]) => {
+      if (failures === 0 && /^insert into "order"/.test(sql)) {
+        failures++;
+        return Promise.reject(Object.assign(
+          new Error('UNIQUE constraint failed: order.code'), { code: 'SQLITE_CONSTRAINT' }
+        ));
+      }
+      return (query as any)(sql, ...rest);
+    });
+    return connection;
+  });
+  await db.flush();
+  expect(failures).toBe(1);
+  expect((await db.table('order').get({ id: order.id })).user!.id).toBe(user.id);
   jest.restoreAllMocks();
   await db.end();
 });

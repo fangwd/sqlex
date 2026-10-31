@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Table, _toCamel, getUniqueFields } from './database';
 import {
   Field,
@@ -58,6 +59,8 @@ const RecordProxy: ProxyHandler<Record> = {
     }
 
     const runtime = runtimeOf(record);
+    // Inside an attempt the write below claims the record.
+    if (!currentAttempt()) runtime.assertUnowned();
     const model = runtime.table.model;
     const field = model.field(name);
     if (field instanceof ForeignKeyField) {
@@ -145,9 +148,13 @@ export class Record {
 
   async save(): Promise<this> {
     const runtime = runtimeOf(this);
+    // Check before waiting for a connection that an owning flush may hold.
+    runtime.assertClaimable('save');
     if (!runtime.isDirty()) return this;
     await using connection = await runtime.table.db.pool.getConnection();
-    return await connection.transaction(() => flushRecord(connection, this)) as this;
+    return await runRecordAttempt('save', () =>
+      connection.transaction(() => flushRecord(connection, this)) as Promise<this>
+    );
   }
 
   update(data: Row = {}): Promise<this> {
@@ -156,8 +163,9 @@ export class Record {
     return this.save();
   }
 
-  delete(): Promise<any> {
+  async delete(): Promise<any> {
     const runtime = runtimeOf(this);
+    runtime.assertUnowned();
     const filter = getUniqueFields(runtime.table.model, runtime.data as Document);
     return runtime.table.delete(filter).then(result => {
       runtime.state.deleted = true;
@@ -213,13 +221,86 @@ Object.defineProperty(Record.prototype, Symbol.for('nodejs.util.inspect.custom')
 
 export type DynamicRecord = Record & { [key: string]: any };
 
+type AttemptRecord = {
+  data: { [key: string]: FieldValue };
+  state: FlushState;
+  inserted: boolean;
+};
+
+const recordAttempts = new AsyncLocalStorage<RecordAttempt | undefined>();
+
+type AttemptKind = 'flush' | 'save';
+
+/** A flush's or save's private record state, published only after its transaction commits. */
+class RecordAttempt {
+  private records = new Map<RecordRuntime, AttemptRecord>();
+  open = true;
+
+  constructor(readonly kind: AttemptKind) {}
+
+  peek(runtime: RecordRuntime): AttemptRecord | undefined {
+    return this.records.get(runtime);
+  }
+
+  slot(runtime: RecordRuntime): AttemptRecord {
+    let slot = this.records.get(runtime);
+    if (!slot) {
+      runtime.claim(this);
+      slot = runtime.committedCopy();
+      this.records.set(runtime, slot);
+    }
+    return slot;
+  }
+
+  publish(): void {
+    for (const [runtime, slot] of this.records) runtime.publish(slot);
+  }
+
+  release(): void {
+    this.open = false;
+    for (const runtime of this.records.keys()) runtime.release(this);
+  }
+}
+
+/**
+ * The attempt the caller runs in. Callbacks scheduled during an attempt keep
+ * its async context after it settles; they see committed state instead.
+ */
+function currentAttempt(): RecordAttempt | undefined {
+  const attempt = recordAttempts.getStore();
+  return attempt?.open ? attempt : undefined;
+}
+
+/**
+ * Runs `run` with private record state. Every record the attempt touches
+ * belongs to it until `run` settles, and its state is published only if `run`
+ * resolves, after its transaction has committed. Saves may share records, such
+ * as a common unsaved parent, which the database settles by unique key; a
+ * flush shares its records with no other attempt.
+ */
+export async function runRecordAttempt<T>(kind: AttemptKind, run: () => Promise<T>): Promise<T> {
+  const attempt = new RecordAttempt(kind);
+  try {
+    const result = await recordAttempts.run(attempt, run);
+    attempt.publish();
+    return result;
+  } finally {
+    attempt.release();
+  }
+}
+
+export function withoutRecordAttempt<T>(run: () => T): T {
+  return recordAttempts.run(undefined, run);
+}
+
 /** @internal */
 export class RecordRuntime {
   record: Record;
-  data: { [key: string]: FieldValue } = {};
-  state = new FlushState();
+  private committedData: { [key: string]: FieldValue } = {};
+  private committedState = new FlushState();
+  private committedInserted = false;
+  private owners = new Set<RecordAttempt>();
   related: { [key: string]: RecordSet } = {};
-  inserted = false;
   connect = false;
   // On unique-key conflict, adopt the existing row instead of updating it.
   insertOnly = false;
@@ -230,8 +311,94 @@ export class RecordRuntime {
     this.record = record;
   }
 
+  get data(): { [key: string]: FieldValue } {
+    return currentAttempt()?.slot(this).data ?? this.committedData;
+  }
+
+  set data(data: { [key: string]: FieldValue }) {
+    const attempt = currentAttempt();
+    if (attempt) {
+      attempt.slot(this).data = data;
+    } else {
+      this.assertUnowned();
+      this.committedData = data;
+    }
+  }
+
+  get state(): FlushState {
+    return currentAttempt()?.slot(this).state ?? this.committedState;
+  }
+
+  set state(state: FlushState) {
+    const attempt = currentAttempt();
+    if (attempt) {
+      attempt.slot(this).state = state;
+    } else {
+      this.assertUnowned();
+      this.committedState = state;
+    }
+  }
+
+  get inserted(): boolean {
+    return currentAttempt()?.slot(this).inserted ?? this.committedInserted;
+  }
+
+  set inserted(inserted: boolean) {
+    const attempt = currentAttempt();
+    if (attempt) {
+      attempt.slot(this).inserted = inserted;
+    } else {
+      this.assertUnowned();
+      this.committedInserted = inserted;
+    }
+  }
+
+  /** Throws unless an attempt of `kind` may own this record alongside its current owners. */
+  assertClaimable(kind: AttemptKind, attempt?: RecordAttempt): void {
+    for (const owner of this.owners) {
+      if (owner !== attempt && (kind === 'flush' || owner.kind === 'flush')) throw this.busy(owner);
+    }
+  }
+
+  /** Throws if any attempt owns this record, since its publish would overwrite an outside write. */
+  assertUnowned(): void {
+    const [owner] = this.owners;
+    if (owner) throw this.busy(owner);
+  }
+
+  private busy(owner: RecordAttempt): Error {
+    // Read the committed data: reading through another attempt would claim.
+    const repr = withoutRecordAttempt(() => this.repr());
+    const action = owner.kind === 'flush' ? 'flushed' : 'saved';
+    return Error(`${repr} is being ${action}; wait for it to finish before changing, saving or deleting it`);
+  }
+
+  claim(attempt: RecordAttempt): void {
+    this.assertClaimable(attempt.kind, attempt);
+    this.owners.add(attempt);
+  }
+
+  release(attempt: RecordAttempt): void {
+    this.owners.delete(attempt);
+  }
+
+  committedCopy(): AttemptRecord {
+    return {
+      data: { ...this.committedData },
+      state: this.committedState.copy(),
+      inserted: this.committedInserted
+    };
+  }
+
+  publish(slot: AttemptRecord): void {
+    this.committedData = slot.data;
+    this.committedState = slot.state;
+    this.committedInserted = slot.inserted;
+  }
+
   isDirty(): boolean {
-    return this.state.dirty.size > 0;
+    const attempt = currentAttempt();
+    return (attempt?.peek(this)?.state ?? this.committedState).dirty.size > 0;
   }
 
   disconnect() {

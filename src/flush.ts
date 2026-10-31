@@ -3,13 +3,14 @@ import {
   Table,
   Filter,
   toDocument,
-  getUniqueFields
+  getUniqueFields,
+  _toCamel
 } from './database';
-import { Record, FieldValue, runtimeOf } from './record';
+import { Record, runRecordAttempt, runtimeOf, withoutRecordAttempt } from './record';
 
 import { Connection, Row } from './engine';
 import { encodeFilter } from './filter';
-import { SimpleField, ForeignKeyField, RelatedField } from './schema';
+import { SimpleField, ForeignKeyField, RelatedField, UniqueKey } from './schema';
 import { Document, Value } from './types';
 
 export enum FlushMethod {
@@ -24,11 +25,17 @@ export class FlushState {
   deleted: boolean = false;
   merged: Record | null = null;
   selected?: boolean = false;
-  clone(): FlushState {
+  copy(): FlushState {
     const state = new FlushState();
     state.method = this.method;
     state.dirty = new Set(this.dirty);
     state.deleted = this.deleted;
+    state.merged = this.merged;
+    state.selected = this.selected;
+    return state;
+  }
+  clone(): FlushState {
+    const state = this.copy();
     state.merged = null;
     state.selected = false;
     return state;
@@ -212,10 +219,9 @@ function flushTable(
 }
 
 /**
- * Every table's records and every record's flush state, and a function that
- * puts them back. A transaction that rolls back undoes the rows its inserts
- * wrote, so the records those inserts touched - in every table, not only the one
- * that failed - must forget their new ids and be written again by the retry.
+ * Hook callbacks can add records to table lists and maps. Save those public
+ * collections before invoking a hook so a failed transaction restores them.
+ * Ordinary flush work uses RecordAttempt instead of this snapshot.
  */
 function snapshot(db: Database): () => void {
   const tables = db.tableList.map(table => ({
@@ -280,16 +286,18 @@ function _flushTable(
   }
 
   async function _select(): Promise<void> {
-    if (filter.length === 0) return;
+    const pending = filter.filter(record =>
+      runtimeOf(record).isDirty() && !runtimeOf(record).state.selected);
+    if (pending.length === 0) return;
     const fields = model.fields.filter(field => nameSet.has(field.name));
     const columns = fields.map(field => dialect.escapeId((field as SimpleField).column.name));
     const from = dialect.escapeId(model.table.name);
     const map = makeMapTable(table);
     // One OR term per record: a single statement for tens of thousands of
     // records makes the database's planning time grow far faster than linearly.
-    for (let start = 0; start < filter.length; start += SELECT_BATCH_SIZE) {
+    for (let start = 0; start < pending.length; start += SELECT_BATCH_SIZE) {
       const where = encodeFilter(
-        filter.slice(start, start + SELECT_BATCH_SIZE).map(r => runtimeOf(r).filter()),
+        pending.slice(start, start + SELECT_BATCH_SIZE).map(r => runtimeOf(r).filter()),
         table.model,
         dialect,
         table.db.operatorMap,
@@ -298,14 +306,14 @@ function _flushTable(
       const rows = await connection._query(`select ${columns.join(',')} from ${from} where ${where}`);
       rows.forEach((row: Row) => map.append(toDocument(row, table.model)));
     }
-    for (const record of table.recordList) {
+    for (const record of pending) {
       if (!runtimeOf(record).isDirty()) continue;
       const existing = map._mapGet(record);
       if (existing) {
         runtimeOf(record).updateState(existing);
       }
     }
-    for (const record of filter) {
+    for (const record of pending) {
       if (runtimeOf(record).connect) {
         runtimeOf(record).state.selected = true;
       }
@@ -314,6 +322,7 @@ function _flushTable(
 
   let insertCount = 0;
   let updateCount = 0;
+  let postgresCount = 0;
 
   function _insert() {
     interface MapEntry {
@@ -425,12 +434,260 @@ function _flushTable(
     }
   }
 
-  return _select()
+  return flushPostgresKeys(connection, table, recordSet, perfect)
+    .then(count => {
+      postgresCount = count;
+      return _select();
+    })
     .then(() => _insert())
     .then(() => _update())
     .then(() => {
-      return filter.length + insertCount + updateCount;
+      return filter.length + insertCount + updateCount + postgresCount;
     });
+}
+
+/**
+ * Resolve the common PostgreSQL case with a single declared natural key. The
+ * insert arbiter closes the select/insert race. RETURNING tells us which rows
+ * this attempt inserted; a separate statement reads the rows it did not insert
+ * after a competing transaction has committed. This also preserves the exact
+ * meaning of RecordRuntime.inserted without relying on PostgreSQL system
+ * columns or a particular server version.
+ *
+ * Record state changes stay in the RecordAttempt until COMMIT. Records with a
+ * supplied primary key and complex tables stay on the existing path.
+ */
+async function flushPostgresKeys(
+  connection: Connection,
+  table: Table,
+  recordSet: Set<Record>,
+  perfect?: number
+): Promise<number> {
+  if (connection.dialect !== 'postgres') return 0;
+  const model = table.model;
+  const naturalKeys = model.uniqueKeys.filter(key => !key.primary);
+  if (!model.keyField() || !model.primaryKey.autoIncrement() || naturalKeys.length !== 1) return 0;
+  const key = naturalKeys[0];
+  const groups = new Map<string, { names: string[]; records: Record[] }>();
+  for (const record of table.recordList) {
+    const runtime = runtimeOf(record);
+    if (!recordSet.has(record) || runtime.state.method !== FlushMethod.INSERT ||
+        runtime.connect || runtime.state.selected || !runtime.isFlushable(perfect) ||
+        runtime.primaryKey() !== undefined) continue;
+    if (key.fields.some(field => runtime.value(field.name) == null)) continue;
+    const names = [...new Set([...key.fields.map(field => field.name), ...Object.keys(runtime.fields())])].sort();
+    const groupName = `${runtime.insertOnly ? 'only:' : 'write:'}${names.join('\0')}`;
+    let group = groups.get(groupName);
+    if (!group) {
+      group = { names, records: [] };
+      groups.set(groupName, group);
+    }
+    group.records.push(record);
+  }
+
+  let count = 0;
+  for (const [, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+    const { names } = group;
+    const fields = names.map(name => model.field(name) as SimpleField);
+    const sorted = group.records.sort((a, b) => keyOfRecord(a, key).localeCompare(keyOfRecord(b, key)));
+    for (let start = 0; start < sorted.length; start += SELECT_BATCH_SIZE) {
+      const records = sorted.slice(start, start + SELECT_BATCH_SIZE);
+      const byKey = new Map(records.map(record => [keyOfRecord(record, key), record]));
+      // A batch with duplicate arbiter keys would raise a cardinality error if
+      // updated in one statement. mergeRecords normally eliminates these, but
+      // leave unusual key encodings on the legacy path instead of mis-mapping.
+      if (byKey.size !== records.length) continue;
+      const column = (field: SimpleField) => connection.escapeId(field.column.name);
+      const values = records.map(record => `(${fields.map(field =>
+        table.escapeValue(field, runtimeOf(record).value(field.name))).join(',')})`);
+      const sql = `insert into ${connection.escapeId(table.name)} ` +
+        `(${fields.map(column).join(',')}) values ${values.join(',')} ` +
+        `on conflict (${key.fields.map(column).join(',')}) do nothing ` +
+        `returning ${[model.keyField()!, ...key.fields].map(column).join(',')}`;
+      const inserted = await postgresWrite(connection, sql) as Row[];
+      const remaining = new Map(byKey);
+      for (const row of inserted) {
+        const doc = toDocument(row, model);
+        const record = remaining.get(keyOfDocument(doc, key, model));
+        if (!record) throw Error(`Cannot match inserted ${table.name} row by unique key`);
+        const runtime = runtimeOf(record);
+        runtime.setPrimaryKey(model.keyValue(doc)!);
+        runtime.removeDirty(names);
+        runtime.state.selected = true;
+        runtime.state.method = FlushMethod.UPDATE;
+        runtime.inserted = true;
+        remaining.delete(keyOfRecord(record, key));
+      }
+      if (remaining.size > 0) {
+        const updates: { record: Record; fields: Document }[] = [];
+        const selectFields = [...new Set([model.keyField()!.name, ...names])]
+          .map(name => model.field(name) as SimpleField);
+        const where = [...remaining.values()].map(record => `(${key.fields.map(field =>
+          `${column(field)}=${table.escapeValue(field, runtimeOf(record).value(field.name))}`
+        ).join(' and ')})`).join(' or ');
+        const rows = await connection._query(
+          `select ${selectFields.map(column).join(',')} from ${connection.escapeId(table.name)} where ${where}`
+        ) as Row[];
+        for (const row of rows) {
+          const doc = toDocument(row, model);
+          const record = remaining.get(keyOfDocument(doc, key, model));
+          if (!record) continue;
+          const runtime = runtimeOf(record);
+          runtime.setPrimaryKey(model.keyValue(doc)!);
+          runtime.state.selected = true;
+          runtime.state.method = FlushMethod.UPDATE;
+          runtime.removeDirty(key.fields.map(field => field.name));
+          if (runtime.insertOnly) {
+            runtime.state.dirty.clear();
+          } else {
+            const changed: Document = {};
+            for (const name of names) {
+              if (key.fields.some(field => field.name === name)) continue;
+              const value = runtime.value(name);
+              if (sameValue(model.field(name) as SimpleField, value, model.valueOf(doc, name))) {
+                runtime.removeDirty(name);
+              } else {
+                changed[name] = value;
+              }
+            }
+            if (Object.keys(changed).length > 0) {
+              updates.push({ record, fields: changed });
+            }
+          }
+          remaining.delete(keyOfRecord(record, key));
+        }
+        if (remaining.size > 0) {
+          throw new ConcurrentChangeError(`Cannot resolve ${table.name} row after ON CONFLICT DO NOTHING`);
+        }
+        await updatePostgresConflicts(connection, table, key, updates);
+      }
+      count += records.length;
+    }
+  }
+  return count;
+}
+
+async function updatePostgresConflicts(
+  connection: Connection,
+  table: Table,
+  key: UniqueKey,
+  updates: { record: Record; fields: Document }[]
+): Promise<void> {
+  const groups = new Map<string, typeof updates>();
+  const individual: typeof updates = [];
+  const keyBatchable = key.fields.every(field => valuesLiteralType(field));
+  for (const update of updates) {
+    const names = Object.keys(update.fields).sort();
+    const simple = keyBatchable &&
+      names.every(name => valuesLiteralType(table.model.field(name) as SimpleField));
+    const groupName = simple ? names.join('\0') : '';
+    if (!groupName) {
+      individual.push(update);
+      continue;
+    }
+    let group = groups.get(groupName);
+    if (!group) {
+      group = [];
+      groups.set(groupName, group);
+    }
+    group.push(update);
+  }
+
+  const escape = (field: SimpleField) => connection.escapeId(field.column.name);
+  for (const update of individual.sort((a, b) =>
+    keyOfRecord(a.record, key).localeCompare(keyOfRecord(b.record, key)))) {
+    const result = await table._update(connection, update.fields, runtimeOf(update.record).filter())
+      .catch(markNonRetryableUnique);
+    if ((result?.affectedRowCount ?? result?.affectedRows ?? 0) !== 1) {
+      throw new ConcurrentChangeError(`${table.name} row changed before conflict update`);
+    }
+    runtimeOf(update.record).removeDirty(Object.keys(update.fields));
+  }
+  for (const [, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+    const names = Object.keys(group[0].fields).sort();
+    const changedFields = names.map(name => table.model.field(name) as SimpleField);
+    group.sort((a, b) => keyOfRecord(a.record, key).localeCompare(keyOfRecord(b.record, key)));
+    for (let start = 0; start < group.length; start += SELECT_BATCH_SIZE) {
+      const chunk = group.slice(start, start + SELECT_BATCH_SIZE);
+      if (changedFields.some(field => chunk.every(item => item.fields[field.name] == null) &&
+          valuesLiteralType(field) === 'scalar')) {
+        for (const item of chunk) {
+          const result = await table._update(connection, item.fields, runtimeOf(item.record).filter())
+            .catch(markNonRetryableUnique);
+          if ((result?.affectedRowCount ?? result?.affectedRows ?? 0) !== 1) {
+            throw new ConcurrentChangeError(`${table.name} row changed before conflict update`);
+          }
+          runtimeOf(item.record).removeDirty(names);
+        }
+        continue;
+      }
+      const columns = [...key.fields, ...changedFields];
+      const values = chunk.map(item => `(${columns.map(field =>
+        table.escapeValue(field, key.fields.includes(field)
+          ? runtimeOf(item.record).value(field.name)
+          : item.fields[field.name] as Value)).join(',')})`);
+      const joins = key.fields.map(field => `target.${escape(field)} = incoming.${escape(field)}`).join(' and ');
+      const assignments = changedFields.map(field => `${escape(field)} = incoming.${escape(field)}`).join(',');
+      const sql = `update ${connection.escapeId(table.name)} as target set ${assignments} ` +
+        `from (values ${values.join(',')}) as incoming (${columns.map(escape).join(',')}) ` +
+        `where ${joins} returning target.${escape(table.model.keyField()!)}`;
+      const updated = await postgresWrite(connection, sql) as Row[];
+      if (updated.length !== chunk.length) {
+        throw new ConcurrentChangeError(`${table.name} row changed before conflict update`);
+      }
+      for (const item of chunk) runtimeOf(item.record).removeDirty(names);
+    }
+  }
+}
+
+const TEXT_TYPE = /^(char|character|varchar|character varying|text)$/i;
+const SCALAR_TYPE =
+  /^(smallint|int|integer|bigint|int2|int4|int8|decimal|numeric|real|float|float4|float8|double|double precision|bool|boolean)$/i;
+
+/**
+ * How an escaped literal of this column reads from an untyped VALUES table:
+ * 'text' columns accept the resolved text type, 'scalar' columns need at least
+ * one non-null value to fix their type, and other types are not supported.
+ */
+function valuesLiteralType(field: SimpleField): 'text' | 'scalar' | undefined {
+  const type = field.column.type.replace(/\s*\(.*\)$/, '');
+  if (TEXT_TYPE.test(type)) return 'text';
+  if (SCALAR_TYPE.test(type)) return 'scalar';
+}
+
+/** A row changed between statements of one attempt; a fresh attempt can resolve it. */
+class ConcurrentChangeError extends Error {}
+
+async function postgresWrite(connection: Connection, sql: string): Promise<unknown> {
+  try {
+    return await connection._query(sql);
+  } catch (error) {
+    throw markNonRetryableUnique(error);
+  }
+}
+
+function markNonRetryableUnique(error: unknown): never {
+  if (error && typeof error === 'object' && (error as { code?: string }).code === '23505') {
+    (error as { noUniqueRetry?: boolean }).noUniqueRetry = true;
+  }
+  throw error;
+}
+
+function keyOfRecord(record: Record, key: UniqueKey): string {
+  return keyString(key.fields.map(field => runtimeOf(record).value(field.name)));
+}
+
+function keyOfDocument(doc: Document, key: UniqueKey, model: Table['model']): string {
+  return keyString(key.fields.map(field => model.valueOf(doc, field)));
+}
+
+function keyString(values: (Value | undefined)[]): string {
+  return JSON.stringify(values.map(value => value instanceof Date ? value.toISOString() : value));
+}
+
+/** Whether a supplied value equals a stored one, so the update can be skipped. */
+function sameValue(field: SimpleField, value: Value, stored: Value | undefined): boolean {
+  return keyString([_toCamel(value, field)]) === keyString([_toCamel(stored, field)]);
 }
 
 function mergeRecords(table: Table) {
@@ -469,58 +726,117 @@ function mergeRecords(table: Table) {
   }
 }
 
-function flushDatabaseA(connection: Connection, db: Database): Promise<void> {
-  return new Promise((resolve, reject) => {
-    function _flush() {
-      const promises = db.tableList.map(table =>
-        flushTable(connection, table, 1)
-      );
-      Promise.all(promises)
-        .then(results => {
-          if (results.reduce((a, b) => a + b, 0) === 0) {
-            resolve();
-          } else {
-            _flush();
-          }
-        })
-        .catch(error => reject(error));
+/** Stable parent-before-child order for required schema references. */
+function orderedTables(db: Database): Table[] {
+  const tables = [...db.tableList].sort((a, b) => a.name.localeCompare(b.name));
+  const byModel = new Map(tables.map(table => [table.model, table]));
+  const remaining = new Set(tables);
+  const result: Table[] = [];
+  while (remaining.size > 0) {
+    const ready = [...remaining].filter(table => !table.model.fields.some(field =>
+      field instanceof ForeignKeyField && !field.column.nullable &&
+      field.referencedField.model !== table.model &&
+      remaining.has(byModel.get(field.referencedField.model)!)
+    ));
+    if (ready.length === 0) {
+      // A schema cycle need not occur in the current records. Actual unresolved
+      // record references are diagnosed if the flush cannot make progress.
+      result.push(...remaining);
+      break;
     }
-    _flush();
-  });
+    for (const table of ready) {
+      result.push(table);
+      remaining.delete(table);
+    }
+  }
+  return result;
 }
 
-export function flushDatabaseB(connection: Connection, db: Database, allowPartial: boolean): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    let waiting = 0;
-    function _flush() {
-      const promises = db.tableList.map(table => flushTable(connection, table));
-      Promise.all(promises)
-        .then(results => {
-          const count = results.reduce((a, b) => a + b, 0);
-          if (count === 0 && db.getDirtyCount() > 0) {
-            if (waiting++ > db.tableList.length) {
-              if (!allowPartial) {
-                dumpDirtyRecords(db);
-                throw Error('Circular references/Incomplete data');
-              }
-              else {
-                resolve(false);
-                return;
-              }
-            }
-          } else {
-            waiting = 0;
-          }
-          if (db.getDirtyCount() > 0) {
-            _flush();
-          } else {
-            resolve(true);
-          }
-        })
-        .catch(error => reject(error));
+function readyTables(tables: Table[], perfect?: number): Table[] {
+  return tables.filter(table => table.recordList.some(record =>
+    runtimeOf(record).isDirty() && runtimeOf(record).isFlushable(perfect)));
+}
+
+/** A progress marker for the still-dirty records, including resolved parents. */
+function dirtyStamp(db: Database): string {
+  return db.tableList.map(table => table.recordList.map(record => {
+    const runtime = runtimeOf(record);
+    if (!runtime.isDirty()) return '';
+    const state = runtime.state;
+    return [state.method, state.selected, Boolean(state.merged),
+      [...state.dirty].sort().join(','), String(runtime.primaryKey())].join(':');
+  }).join('|')).join(';');
+}
+
+async function flushDatabaseA(connection: Connection, db: Database): Promise<void> {
+  const tables = orderedTables(db);
+  for (;;) {
+    const ready = readyTables(tables, 1);
+    if (ready.length === 0) return;
+    const before = dirtyStamp(db);
+    for (const table of ready) await flushTable(connection, table, 1);
+    if (dirtyStamp(db) === before) return;
+  }
+}
+
+export async function flushDatabaseB(connection: Connection, db: Database, allowPartial: boolean): Promise<boolean> {
+  const tables = orderedTables(db);
+  while (db.getDirtyCount() > 0) {
+    const ready = readyTables(tables);
+    if (ready.length === 0) return incompleteFlush(db, allowPartial);
+    const before = dirtyStamp(db);
+    for (const table of ready) await flushTable(connection, table);
+    if (dirtyStamp(db) === before) return incompleteFlush(db, allowPartial);
+  }
+  return true;
+}
+
+function incompleteFlush(db: Database, allowPartial: boolean): boolean {
+  if (allowPartial) return false;
+  const cycle = blockedRecordCycle(db);
+  if (cycle) throw Error(`Circular references: ${cycle}`);
+  dumpDirtyRecords(db);
+  throw Error('Incomplete data');
+}
+
+function blockedRecordCycle(db: Database): string | undefined {
+  const blocked = new Set(db.tableList.flatMap(table => table.recordList.filter(record =>
+    runtimeOf(record).isDirty() && !runtimeOf(record).state.merged)));
+  const visiting = new Set<Record>();
+  const visited = new Set<Record>();
+  const path: { record: Record; field: string }[] = [];
+  function visit(record: Record): string | undefined {
+    if (visiting.has(record)) {
+      const start = path.findIndex(entry => entry.record === record);
+      return path.slice(start).map(entry => `${runtimeOf(entry.record).table.name}.${entry.field}`)
+        .concat(`${runtimeOf(record).table.name}.${path[start].field}`).join(' -> ');
     }
-    _flush();
-  });
+    if (visited.has(record)) return;
+    visiting.add(record);
+    const runtime = runtimeOf(record);
+    for (const field of runtime.state.dirty) {
+      let parent = runtime.data[field];
+      if (!(parent instanceof Record)) continue;
+      while (runtimeOf(parent).state.merged) parent = runtimeOf(parent).state.merged!;
+      if (!blocked.has(parent)) continue;
+      const parentRuntime = runtimeOf(parent);
+      const schemaField = runtime.table.model.field(field);
+      const keyName = schemaField instanceof ForeignKeyField
+        ? schemaField.referencedField.name
+        : parentRuntime.table.model.primaryKey.fields[0].name;
+      if (!parentRuntime.state.dirty.has(keyName) && parentRuntime.value(keyName) !== undefined) continue;
+      path.push({ record, field });
+      const cycle = visit(parent);
+      if (cycle) return cycle;
+      path.pop();
+    }
+    visiting.delete(record);
+    visited.add(record);
+  }
+  for (const record of blocked) {
+    const cycle = visit(record);
+    if (cycle) return cycle;
+  }
 }
 
 export interface FlushOptions {
@@ -532,53 +848,42 @@ export interface FlushOptions {
   allowPartial?: boolean;
 }
 
-export function flushDatabase(
+export async function flushDatabase(
   connection: Connection,
   db: Database,
   options: FlushOptions = {}
 ): Promise<boolean> {
-  let { afterBegin, beforeCommit, allowPartial } = options;
-
-  afterBegin = afterBegin || ((c: Connection) => Promise.resolve());
-  beforeCommit = beforeCommit || ((c: Connection) => Promise.resolve());
-
-  return new Promise((resolve, reject) => {
-    let perfect = true;
-    const _flush = () => {
-      const restore = snapshot(db);
-      connection.transaction(() => {
-        afterBegin(connection)
-          .then(() =>
-            (perfect ? flushDatabaseA(connection, db) : Promise.resolve()).then(
-              () =>
-                flushDatabaseB(connection, db, allowPartial ?? false).then((complete) =>
-                  (options.replaceRecordsIn
-                    ? replaceRecordsIn(connection, db, options.replaceRecordsIn, options.replaceRoots)
-                    : Promise.resolve()
-                  )
-                    .then(() => beforeCommit(connection))
-                    .then(() => connection.commit())
-                    .then(() => resolve(complete))
-                )
-            )
-          )
-          .catch((error: unknown) => {
-            connection.rollback().then(() => {
-              restore();
-              if (perfect && isIntegrityError(error)) {
-                perfect = false;
-                setTimeout(_flush, Math.random() * 1000);
-              } else if (isRetryable(error)) {
-                setTimeout(_flush, Math.random() * 1000);
-              } else {
-                reject(Error(error as string));
-              }
-            });
-          });
-      });
-    };
-    _flush();
-  });
+  let perfect = true;
+  const hasHooks = Boolean(options.afterBegin || options.beforeCommit);
+  for (let retries = 0; ; retries++) {
+    // Hooks may append or clear records, changing the table's identity maps.
+    // Ordinary flushes only change RecordRuntime state, which the attempt owns.
+    const restore = hasHooks ? snapshot(db) : undefined;
+    try {
+      return await runRecordAttempt('flush', () =>
+        connection.transaction(async () => {
+          if (options.afterBegin) await options.afterBegin(connection);
+          if (perfect) await flushDatabaseA(connection, db);
+          const complete = await flushDatabaseB(connection, db, options.allowPartial ?? false);
+          if (options.replaceRecordsIn) {
+            await replaceRecordsIn(connection, db, options.replaceRecordsIn, options.replaceRoots);
+          }
+          if (options.beforeCommit) await options.beforeCommit(connection);
+          return complete;
+        }) as Promise<boolean>
+      );
+    } catch (error) {
+      if (restore) withoutRecordAttempt(restore);
+      if (perfect && isIntegrityError(error)) {
+        perfect = false;
+      } else if (!isRetryable(error)) {
+        throw error;
+      }
+      if (retries >= 7) throw error;
+      const backoff = Math.min(500, 10 * 2 ** retries);
+      await new Promise(resolve => setTimeout(resolve, Math.random() * backoff));
+    }
+  }
 }
 
 function errorText(error: unknown): string {
@@ -587,13 +892,32 @@ function errorText(error: unknown): string {
 }
 
 function isIntegrityError(error: unknown) {
-  // postgres: duplicate key value violates unique constraint "order_pkey"
-  return /\bDuplicate\b|UNIQUE constraint|\blocked\b/i.test(errorText(error));
+  const { code, errno, noUniqueRetry } = (error ?? {}) as {
+    code?: string | number; errno?: number; noUniqueRetry?: boolean
+  };
+  if (noUniqueRetry) return false;
+  if (code !== undefined) {
+    return code === '23505' || code === 'ER_DUP_ENTRY' || code === 1062 ||
+      code === 'SQLITE_CONSTRAINT_UNIQUE' || code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+      (code === 'SQLITE_CONSTRAINT' && /UNIQUE constraint|PRIMARY KEY/i.test(errorText(error)));
+  }
+  if (errno !== undefined) return errno === 1062;
+  return /\bDuplicate\b|UNIQUE constraint/i.test(errorText(error));
 }
 
 function isRetryable(error: unknown) {
-  const { message } = (error ?? {}) as { message?: string };
-  return /\b(Deadlock|locked)\b/i.test(message || '');
+  if (error instanceof ConcurrentChangeError) return true;
+  const { message, code, errno } = (error ?? {}) as {
+    message?: string; code?: string | number; errno?: number
+  };
+  if (code !== undefined) {
+    return code === '40P01' || code === '40001' ||
+      code === 'ER_LOCK_DEADLOCK' || code === 'ER_LOCK_WAIT_TIMEOUT' ||
+      code === 1213 || code === 1205 ||
+      (typeof code === 'string' && /^(SQLITE_BUSY|SQLITE_LOCKED)/.test(code));
+  }
+  if (errno !== undefined) return errno === 1213 || errno === 1205;
+  return /\b(Deadlock|locked|serialization failure)\b/i.test(message || '');
 }
 
 export function dumpDirtyRecords(db: Database, all: boolean = false) {
