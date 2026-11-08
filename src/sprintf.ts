@@ -45,6 +45,10 @@ export function tokenise(input: string): Token[] {
       }
     } else if (c === '?') {
       tokens.push({ type: 'variable' });
+    } else if (c === ':' && input[i + 1] === ':') {
+      // a PostgreSQL cast, 'x::text', is no named variable
+      tokens.push({ type: 'literal', text: '::' });
+      i++;
     } else if (c === ':') {
       let name = '';
       for (let j = i + 1; ; j++) {

@@ -23,6 +23,11 @@ describe('tokeniser', () => {
     expect(() => tokenise(': id')).toThrow();
   });
 
+  it('should keep a PostgreSQL cast', () => {
+    expect(tokenise('::')).toEqual([literal('::')]);
+    expect(tokenise(':id::int')).toEqual([variable('id'), literal('::'), literal('int')]);
+  });
+
   it('should handle strings', () => {
     expect(tokenise(`''`)).toEqual([literal(`''`)]);
     expect(tokenise(`'\\'`)).toEqual([literal(`'\\'`)]);
@@ -87,6 +92,12 @@ describe('sprintf', () => {
 
   it('should handle object arguments', () => {
     expect(sprintf(':name and :range', { name: 'joe', range: [1, 2] })).toBe(`'joe' and 1, 2`);
+  });
+
+  it('should format around casts', () => {
+    expect(sprintf('select ?::text', [1])).toBe(`select 1::text`);
+    expect(sprintf('select :n::int', { n: 2 })).toBe(`select 2::int`);
+    expect(sprintf('select cast(array[?, ?]::text[] as text[])', ['a', 'b'])).toBe(`select cast(array['a', 'b']::text[] as text[])`);
   });
 
   it('should throw on insufficient arguments', () => {

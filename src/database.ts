@@ -273,9 +273,10 @@ export class Database<TTables = any> {
   }
 
   async query<T = Document[]>(fmt: string, ...args: unknown[]) {
-    const connection = await this.pool.getConnection();
     const val = (args.length === 1 && isPlainObject(args[0])) ? args[0] : args;
-    const sql = sprintf(fmt, val as ArgType, this.pool)
+    // formatted before a connection is taken: a malformed statement must not hold one
+    const sql = sprintf(fmt, val as ArgType, this.pool);
+    const connection = await this.pool.getConnection();
     try {
       const result = await connection._query(sql);
       return result as T;
